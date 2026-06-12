@@ -444,22 +444,43 @@ class CardRegionDebugger:
         ocr: EasyOCREngine,
         frame_id: int,
     ) -> tuple[OCRLine, ...]:
+        print(f"[DEBUG] card_detector called frame={frame_id}", flush=True)
         if not self.enabled:
+            print(
+                "[DEBUG] card_detector disabled: "
+                f"debug_card_regions={self.config.debug_card_regions} loaded_regions={sorted(self.regions)}",
+                flush=True,
+            )
             return ()
         interval = max(self.config.debug_card_regions_interval_sec, 0.1)
         should_process = time.monotonic() - self.last_saved_at >= interval
         if not should_process:
+            print(f"[DEBUG] card_detector throttled frame={frame_id} interval={interval:.2f}s", flush=True)
             return ()
         diagnostic_lines: list[OCRLine] = []
         for region_name, label in self.REGION_ATTRS:
             region = self.regions.get(region_name)
             if region is None:
+                print(f"[DEBUG] card_detector region missing frame={frame_id} region={region_name}", flush=True)
                 continue
             raw = capture.grab_region(region)
+            print(
+                f"[DEBUG] card_detector crop frame={frame_id} region={region_name} "
+                f"size={raw.shape[1]}x{raw.shape[0]} px",
+                flush=True,
+            )
             prefix = self._debug_prefix(region_name, frame_id)
             header_lines = self._debug_header(frame_id, region_name, raw)
             self._write_debug_text(prefix, header_lines)
             try:
+                if raw.size == 0 or raw.shape[0] == 0 or raw.shape[1] == 0:
+                    zero_lines = (*header_lines, "[detector] SKIPPED - captured region is 0x0 pixels")
+                    self._write_debug_text(prefix, zero_lines)
+                    print(
+                        f"[DEBUG] card_detector skipped frame={frame_id} region={region_name}: 0x0 crop",
+                        flush=True,
+                    )
+                    continue
                 processed = preprocess_card_region(raw, scale=self.config.card_ocr_scale)
                 region_raw_ocr = ocr.read_raw(processed, allowlist=self.config.card_ocr_allowlist)
                 detected_cards, debug_lines_for_file = detect_cards_from_region(
@@ -570,6 +591,7 @@ class OCRWorker(threading.Thread):
         self.last_error: str | None = None
         self.last_debounce_reason = "not started"
         self._frame_id = 0
+        self._capture_frame_id = 0
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -586,19 +608,34 @@ class OCRWorker(threading.Thread):
                     started = time.monotonic()
                     try:
                         frame = capture.grab()
+                        self._capture_frame_id += 1
+                        card_lines = card_debugger.capture_and_read(capture, ocr, self._capture_frame_id)
                         debounce = debouncer.update(frame)
                         self.last_debounce_reason = debounce.reason
                         if debounce.is_stable:
                             lines = ocr.read(frame)
                             self._frame_id += 1
-                            card_lines = card_debugger.capture_and_read(capture, ocr, self._frame_id)
                             self._put_latest(
                                 OCRBatch(lines=lines + card_lines, frame_id=self._frame_id, captured_at=time.time())
                             )
                             if card_debugger.last_error:
                                 self.last_error = card_debugger.last_error
                         else:
-                            card_debugger.write_stability_skip(capture, self._frame_id + 1, debounce.reason)
+                            print(
+                                f"[DEBUG] frame {self._capture_frame_id} dropped: "
+                                f"reason={debounce.reason} stable_count={debounce.stable_count} "
+                                f"motion_score={debounce.motion_score:.3f}",
+                                flush=True,
+                            )
+                            card_debugger.write_stability_skip(capture, self._capture_frame_id, debounce.reason)
+                            if card_lines:
+                                self._put_latest(
+                                    OCRBatch(
+                                        lines=card_lines,
+                                        frame_id=self._capture_frame_id,
+                                        captured_at=time.time(),
+                                    )
+                                )
                     except Exception as exc:  # noqa: BLE001 - worker must not kill the UI loop
                         self.last_error = f"{type(exc).__name__}: {exc}"
                         time.sleep(0.25)
