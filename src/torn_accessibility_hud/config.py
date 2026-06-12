@@ -40,9 +40,12 @@ class OCRConfig:
     paragraph: bool = False
     queue_size: int = 2
     calibrated_regions_path: str | None = "config/regions_calibrated.json"
+    hero_cards_region: ScreenRegion | None = None
+    board_cards_region: ScreenRegion | None = None
     debug_card_regions: bool = True
     debug_card_regions_dir: str = "debug_captures/card_regions"
     debug_card_regions_interval_sec: float = 2.0
+    hero_cards_interval_sec: float = 0.0
     card_ocr_scale: float = 3.0
     card_ocr_allowlist: str = "0123456789AaKkQqJjTtCDHScdhs"
 
@@ -180,6 +183,8 @@ def _coerce_dataclass(dataclass_type: type[T], raw: dict[str, Any]) -> T:
         value = raw[item.name]
         if item.name == "region":
             kwargs[item.name] = ScreenRegion(**value)
+        elif item.name.endswith("_region") and isinstance(value, dict):
+            kwargs[item.name] = ScreenRegion(**value)
         elif item.name in _NESTED_TYPES and isinstance(value, dict):
             kwargs[item.name] = _coerce_dataclass(_NESTED_TYPES[item.name], value)
         elif item.name == "languages" and isinstance(value, list):
@@ -233,9 +238,12 @@ def write_default_config(path: str | Path) -> Path:
             "paragraph": False,
             "queue_size": 2,
             "calibrated_regions_path": "config/regions_calibrated.json",
+            "hero_cards_region": None,
+            "board_cards_region": None,
             "debug_card_regions": True,
             "debug_card_regions_dir": "debug_captures/card_regions",
             "debug_card_regions_interval_sec": 2.0,
+            "hero_cards_interval_sec": 0.0,
             "card_ocr_scale": 3.0,
             "card_ocr_allowlist": "0123456789AaKkQqJjTtCDHScdhs",
         },

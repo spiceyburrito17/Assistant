@@ -414,9 +414,10 @@ class CardRegionDebugger:
         self.config = config
         self.output_dir = Path(config.debug_card_regions_dir)
         self.regions = self._load_regions(config.calibrated_regions_path)
-        self.last_saved_at = 0.0
+        self.last_saved_at: dict[str, float] = {}
         self.last_error: str | None = None
         self.last_detected: dict[str, tuple[str, ...]] = {}
+        self._log_configured_regions()
 
     @property
     def enabled(self) -> bool:
@@ -426,7 +427,8 @@ class CardRegionDebugger:
         if not self.enabled:
             return
         interval = max(self.config.debug_card_regions_interval_sec, 0.1)
-        if time.monotonic() - self.last_saved_at < interval:
+        key = "stability_skip"
+        if time.monotonic() - self.last_saved_at.get(key, 0.0) < interval:
             return
         for region_name, _label in self.REGION_ATTRS:
             region = self.regions.get(region_name)
@@ -443,7 +445,7 @@ class CardRegionDebugger:
                 ),
             )
             self._save_raw_debug_image(prefix, raw)
-        self.last_saved_at = time.monotonic()
+        self.last_saved_at[key] = time.monotonic()
 
     def capture_and_read(
         self,
@@ -459,13 +461,14 @@ class CardRegionDebugger:
                 sorted(self.regions),
             )
             return ()
-        interval = max(self.config.debug_card_regions_interval_sec, 0.1)
-        should_process = time.monotonic() - self.last_saved_at >= interval
-        if not should_process:
-            debug_log("card_detector throttled frame=%s interval=%.2fs", frame_id, interval)
-            return ()
         diagnostic_lines: list[OCRLine] = []
         for region_name, label in self.REGION_ATTRS:
+            interval = self._interval_for_region(region_name)
+            last_saved_at = self.last_saved_at.get(region_name, 0.0)
+            should_process = time.monotonic() - last_saved_at >= interval
+            if not should_process:
+                debug_log("card_detector throttled frame=%s region=%s interval=%.2fs", frame_id, region_name, interval)
+                continue
             region = self.regions.get(region_name)
             if region is None:
                 debug_log("card_detector region missing frame=%s region=%s", frame_id, region_name)
@@ -520,8 +523,13 @@ class CardRegionDebugger:
                 self._write_debug_text(prefix, error_lines)
                 self.last_error = f"{region_name} card debug failed: {type(exc).__name__}: {exc}"
                 continue
-        self.last_saved_at = time.monotonic()
+            self.last_saved_at[region_name] = time.monotonic()
         return tuple(diagnostic_lines)
+
+    def _interval_for_region(self, region_name: str) -> float:
+        if region_name == "hero_cards_region":
+            return max(self.config.hero_cards_interval_sec, 0.0)
+        return max(self.config.debug_card_regions_interval_sec, 0.1)
 
     def _debug_prefix(self, region_name: str, frame_id: int) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -568,22 +576,43 @@ class CardRegionDebugger:
                 fp.write(f"{line}\n")
 
     def _load_regions(self, path: str | None) -> dict[str, Any]:
+        regions: dict[str, Any] = {}
         if not path:
-            return {}
-        regions_path = Path(path)
-        if not regions_path.exists():
-            self.last_error = f"Calibrated regions file not found: {regions_path}"
-            return {}
-        try:
-            regions = RegionsConfig.load(regions_path).as_dict()
-        except (OSError, ValueError) as exc:
-            self.last_error = f"Unable to load calibrated regions: {exc}"
-            return {}
+            regions = {}
+        else:
+            regions_path = Path(path)
+            if not regions_path.exists():
+                self.last_error = f"Calibrated regions file not found: {regions_path}"
+            else:
+                try:
+                    regions = RegionsConfig.load(regions_path).as_dict()
+                except (OSError, ValueError) as exc:
+                    self.last_error = f"Unable to load calibrated regions: {exc}"
+                    regions = {}
+        if self.config.hero_cards_region is not None:
+            regions["hero_cards_region"] = self.config.hero_cards_region
+        if self.config.board_cards_region is not None:
+            regions["board_cards_region"] = self.config.board_cards_region
         return {
             region_name: regions[region_name]
             for region_name, _label in self.REGION_ATTRS
             if region_name in regions
         }
+
+    def _log_configured_regions(self) -> None:
+        for region_name, _label in self.REGION_ATTRS:
+            region = self.regions.get(region_name)
+            if region is None:
+                debug_log("configured %s: <missing>", region_name)
+                continue
+            debug_log(
+                "configured %s: left=%s top=%s width=%s height=%s",
+                region_name,
+                region.left,
+                region.top,
+                region.width,
+                region.height,
+            )
 
 
 class OCRWorker(threading.Thread):
@@ -640,7 +669,6 @@ class OCRWorker(threading.Thread):
                                     debounce.stable_count,
                                     debounce.motion_score,
                                 )
-                                card_debugger.write_stability_skip(capture, self._capture_frame_id, debounce.reason)
                                 if card_lines:
                                     self._put_latest(
                                         OCRBatch(

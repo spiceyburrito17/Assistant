@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,6 +59,31 @@ class CardImageDetectionTests(unittest.TestCase):
         self.assertIn("hero captured crop size: 140x100 px", content[1])
         self.assertIn("hero region size: 140x100 px", content[2])
         self.assertIn("board region size: 386x99 px", content[3])
+
+    def test_card_debugger_uses_explicit_hero_region_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            regions_path = Path(temp_dir) / "regions.json"
+            regions_path.write_text(
+                json.dumps(
+                    {
+                        "hero_cards_region": {"left": 10, "top": 20, "width": 30, "height": 40},
+                        "board_cards_region": {"left": 50, "top": 60, "width": 70, "height": 80},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            debugger = CardRegionDebugger(
+                OCRConfig(
+                    calibrated_regions_path=str(regions_path),
+                    hero_cards_region=ScreenRegion(left=1, top=2, width=3, height=4),
+                    debug_card_regions_dir=temp_dir,
+                    hero_cards_interval_sec=0.0,
+                )
+            )
+        self.assertEqual(debugger.regions["hero_cards_region"].left, 1)
+        self.assertEqual(debugger.regions["hero_cards_region"].width, 3)
+        self.assertEqual(debugger.regions["board_cards_region"].left, 50)
+        self.assertEqual(debugger._interval_for_region("hero_cards_region"), 0.0)
 
     @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
     def test_detect_suit_from_colored_glyphs(self) -> None:

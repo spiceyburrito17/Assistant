@@ -25,9 +25,22 @@
     "paragraph": false,
     "queue_size": 2,
     "calibrated_regions_path": "config/regions_calibrated.json",
+    "hero_cards_region": {
+      "left": -1001,
+      "top": 655,
+      "width": 179,
+      "height": 128
+    },
+    "board_cards_region": {
+      "left": -1200,
+      "top": 367,
+      "width": 486,
+      "height": 128
+    },
     "debug_card_regions": true,
     "debug_card_regions_dir": "debug_captures/card_regions",
     "debug_card_regions_interval_sec": 2.0,
+    "hero_cards_interval_sec": 0.0,
     "card_ocr_scale": 3.0,
     "card_ocr_allowlist": "0123456789AaKkQqJjTtCDHScdhs"
   },

@@ -251,6 +251,16 @@ def _describe_thread(thread: threading.Thread) -> str:
     )
 
 
+def _format_region_for_log(region: object) -> str:
+    if region is None:
+        return "<none>"
+    left = getattr(region, "left", "?")
+    top = getattr(region, "top", "?")
+    width = getattr(region, "width", "?")
+    height = getattr(region, "height", "?")
+    return f"left={left} top={top} width={width} height={height}"
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the Torn City accessibility HUD.")
     parser.add_argument("--config", type=Path, default=Path("config/default_config.json"), help="Path to JSON config.")
@@ -276,6 +286,8 @@ def main(argv: list[str] | None = None) -> int:
     config = AppConfig.load(args.config if args.config.exists() else None)
     write_startup_log("app.main() AppConfig loaded")
     debug_log("app.main() AppConfig loaded")
+    debug_log("config ocr.hero_cards_region: %s", _format_region_for_log(config.ocr.hero_cards_region))
+    debug_log("config ocr.board_cards_region: %s", _format_region_for_log(config.ocr.board_cards_region))
     app = TornHudApplication(config)
     write_startup_log("app.main() TornHudApplication created")
     debug_log("app.main() TornHudApplication created")
