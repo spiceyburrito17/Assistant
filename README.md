@@ -99,6 +99,11 @@ faces. While `ocr.debug_card_regions` is enabled, the OCR worker also saves raw
 and preprocessed hero/board crops plus OCR text under
 `debug_captures/card_regions/`. Use those images to confirm whether a failure is
 caused by shifted coordinates or by unreadable card glyphs.
+For manual tuning, `config/default_config.json` also supports explicit
+`ocr.hero_cards_region` and `ocr.board_cards_region` overrides. Tune
+`ocr.hero_cards_region` to the bottom-centre player area where your two face-up
+hole cards appear. Hero card capture is not gated by the scrolling-log stable
+frame debounce and uses `ocr.hero_cards_interval_sec` (`0.0` means every tick).
 Hero/board detection looks for face-up white card rectangles, OCRs only each
 rank corner, and infers suits from glyph color. It emits hero cards only when
 two cards are detected and board cards only when three to five cards are

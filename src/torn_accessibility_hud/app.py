@@ -9,14 +9,25 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
+from .diagnostics import configure_runtime_logging, debug_log, write_startup_log
+
+configure_runtime_logging()
+write_startup_log("app module import started")
+debug_log("app module import started")
+debug_log("app module importing internal components")
+
 from .config import AppConfig, write_default_config
 from .models import ActionType, EquityRequest, EquityResult, GameSnapshot, OCRBatch, OverlayState, ParsedEvent
 from .parsing.log_parser import ActionLogParser
 from .poker.equity import EquityWorker
 from .tracking.ledger import OpponentLedger
+debug_log("app module importing TkOverlay")
 from .ui.overlay import TkOverlay
 from .ui.recommendation import RecommendationEngine
+debug_log("app module importing OCRWorker")
 from .vision.ocr_engine import OCRWorker
+
+debug_log("app module import completed")
 
 
 class SnapshotBuilder:
@@ -170,17 +181,33 @@ class TornHudApplication:
     """Owns lifecycle for all background components."""
 
     def __init__(self, config: AppConfig) -> None:
+        write_startup_log("app startup: instantiating components")
+        debug_log("app startup: instantiating components")
         self.config = config
+        write_startup_log("app startup: AppConfig assigned")
+        debug_log("app startup: AppConfig assigned")
         self.ocr_queue: queue.Queue[OCRBatch] = queue.Queue(maxsize=config.ocr.queue_size)
+        write_startup_log("app startup: OCR queue created")
+        debug_log("app startup: OCR queue created")
         self.equity_request_queue: queue.Queue[EquityRequest] = queue.Queue(maxsize=1)
+        write_startup_log("app startup: Equity request queue created")
+        debug_log("app startup: Equity request queue created")
         self.equity_result_queue: queue.Queue[EquityResult] = queue.Queue(maxsize=1)
+        write_startup_log("app startup: Equity result queue created")
+        debug_log("app startup: Equity result queue created")
         self.overlay = TkOverlay(config.overlay)
+        write_startup_log("app startup: TkOverlay created")
+        debug_log("app startup: TkOverlay created")
         self.ocr_worker = OCRWorker(config, self.ocr_queue)
+        write_startup_log("app startup: OCRWorker created")
+        debug_log("app startup: OCRWorker created")
         self.equity_worker = EquityWorker(
             self.equity_request_queue,
             self.equity_result_queue,
             seed=config.equity.random_seed,
         )
+        write_startup_log("app startup: EquityWorker created")
+        debug_log("app startup: EquityWorker created")
         self.coordinator = CoordinatorWorker(
             config,
             self.ocr_queue,
@@ -188,12 +215,21 @@ class TornHudApplication:
             self.equity_result_queue,
             self.overlay,
         )
+        write_startup_log("app startup: CoordinatorWorker created")
+        debug_log("app startup: CoordinatorWorker created")
 
     def run(self) -> None:
+        write_startup_log("app startup: starting worker threads")
+        debug_log("app startup: starting worker threads")
+        debug_log("Starting thread: %s", _describe_thread(self.ocr_worker))
         self.ocr_worker.start()
+        debug_log("Starting thread: %s", _describe_thread(self.equity_worker))
         self.equity_worker.start()
+        debug_log("Starting thread: %s", _describe_thread(self.coordinator))
         self.coordinator.start()
         try:
+            write_startup_log("app startup: starting TkOverlay mainloop component")
+            debug_log("app startup: starting TkOverlay mainloop component")
             self.overlay.start()
         finally:
             self.stop()
@@ -204,6 +240,25 @@ class TornHudApplication:
         self.coordinator.stop()
         for worker in (self.ocr_worker, self.equity_worker, self.coordinator):
             worker.join(timeout=1.0)
+
+
+def _describe_thread(thread: threading.Thread) -> str:
+    target = getattr(thread, "_target", None)
+    target_name = getattr(target, "__qualname__", repr(target)) if target is not None else "<Thread.run override>"
+    return (
+        f"class={thread.__class__.__name__} name={thread.name} "
+        f"daemon={thread.daemon} target={target_name}"
+    )
+
+
+def _format_region_for_log(region: object) -> str:
+    if region is None:
+        return "<none>"
+    left = getattr(region, "left", "?")
+    top = getattr(region, "top", "?")
+    width = getattr(region, "width", "?")
+    height = getattr(region, "height", "?")
+    return f"left={left} top={top} width={width} height={height}"
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -218,13 +273,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_runtime_logging()
+    write_startup_log("app.main() entered")
+    debug_log("app.main() entered")
     args = build_arg_parser().parse_args(argv)
+    write_startup_log(f"app.main() parsed args config={args.config}")
+    debug_log("app.main() parsed args config=%s", args.config)
     if args.write_default_config:
         path = write_default_config(args.write_default_config)
         print(f"Wrote default config to {path}")
         return 0
     config = AppConfig.load(args.config if args.config.exists() else None)
+    write_startup_log("app.main() AppConfig loaded")
+    debug_log("app.main() AppConfig loaded")
+    debug_log("config ocr.hero_cards_region: %s", _format_region_for_log(config.ocr.hero_cards_region))
+    debug_log("config ocr.board_cards_region: %s", _format_region_for_log(config.ocr.board_cards_region))
     app = TornHudApplication(config)
+    write_startup_log("app.main() TornHudApplication created")
+    debug_log("app.main() TornHudApplication created")
     try:
         app.run()
     except KeyboardInterrupt:

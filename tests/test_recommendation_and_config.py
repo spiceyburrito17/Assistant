@@ -31,11 +31,14 @@ class RecommendationAndConfigTests(unittest.TestCase):
                         "ocr": {
                             "languages": ["en"],
                             "gpu": True,
+                            "hero_cards_region": {"left": 1, "top": 2, "width": 3, "height": 4},
+                            "board_cards_region": {"left": 5, "top": 6, "width": 7, "height": 8},
                             "debug_card_regions": True,
                             "debug_card_regions_dir": "debug_captures/test_cards",
                             "debug_card_regions_interval_sec": 1.5,
+                            "hero_cards_interval_sec": 0.0,
                             "card_ocr_scale": 4.0,
-                            "card_ocr_allowlist": "AKQJ",
+                            "card_ocr_allowlist": "0123456789AaKkQqJjTt",
                         },
                     }
                 ),
@@ -46,10 +49,17 @@ class RecommendationAndConfigTests(unittest.TestCase):
         self.assertTrue(config.ocr.gpu)
         self.assertEqual(config.ocr.languages, ("en",))
         self.assertTrue(config.ocr.debug_card_regions)
+        self.assertIsNotNone(config.ocr.hero_cards_region)
+        self.assertIsNotNone(config.ocr.board_cards_region)
+        assert config.ocr.hero_cards_region is not None
+        assert config.ocr.board_cards_region is not None
+        self.assertEqual(config.ocr.hero_cards_region.left, 1)
+        self.assertEqual(config.ocr.board_cards_region.width, 7)
         self.assertEqual(config.ocr.debug_card_regions_dir, "debug_captures/test_cards")
         self.assertEqual(config.ocr.debug_card_regions_interval_sec, 1.5)
+        self.assertEqual(config.ocr.hero_cards_interval_sec, 0.0)
         self.assertEqual(config.ocr.card_ocr_scale, 4.0)
-        self.assertEqual(config.ocr.card_ocr_allowlist, "AKQJ")
+        self.assertEqual(config.ocr.card_ocr_allowlist, "0123456789AaKkQqJjTt")
 
     def test_regions_config_loads_named_regions_and_extras(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
