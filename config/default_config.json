@@ -1,0 +1,51 @@
+{
+  "capture": {
+    "monitor_index": 1,
+    "region": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    },
+    "fps_limit": 12.0
+  },
+  "debounce": {
+    "stable_frames_required": 3,
+    "max_mean_delta": 3.5,
+    "hash_width": 96,
+    "hash_height": 54,
+    "min_luma": 12.0,
+    "max_luma": 245.0,
+    "min_variance": 8.0
+  },
+  "ocr": {
+    "languages": ["en"],
+    "gpu": true,
+    "min_confidence": 0.48,
+    "paragraph": false,
+    "queue_size": 2
+  },
+  "parser": {
+    "max_reasonable_amount": 10000000.0,
+    "min_line_confidence": 0.42,
+    "action_patterns_path": null
+  },
+  "equity": {
+    "simulations": 2500,
+    "timeout_ms": 450,
+    "max_opponents": 8,
+    "random_seed": null
+  },
+  "overlay": {
+    "title": "Torn Accessibility HUD",
+    "width": 440,
+    "height": 260,
+    "x": 20,
+    "y": 20,
+    "alpha": 0.86,
+    "always_on_top": true,
+    "poll_interval_ms": 50,
+    "background_hex": "#101820",
+    "text_hex": "#F8F8F2"
+  }
+}

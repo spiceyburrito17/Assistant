@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torn-accessibility-hud"
+version = "0.1.0"
+description = "Local OCR-driven accessibility HUD for reading fast Torn City poker logs."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "easyocr",
+    "mss",
+    "numpy",
+    "opencv-python",
+    "pillow",
+    "treys",
+]
+
+[project.scripts]
+torn-hud = "torn_accessibility_hud.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+torn_accessibility_hud = ["data/*.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
