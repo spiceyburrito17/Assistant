@@ -1,0 +1,26 @@
+{
+  "log_region": {
+    "left": -1120,
+    "top": 181,
+    "width": 320,
+    "height": 158
+  },
+  "hero_cards_region": {
+    "left": -991,
+    "top": 602,
+    "width": 140,
+    "height": 100
+  },
+  "board_cards_region": {
+    "left": -1152,
+    "top": 371,
+    "width": 386,
+    "height": 99
+  },
+  "stack_region": {
+    "left": -1027,
+    "top": 727,
+    "width": 138,
+    "height": 19
+  }
+}

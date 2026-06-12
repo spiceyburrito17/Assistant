@@ -2,10 +2,10 @@
   "capture": {
     "monitor_index": 1,
     "region": {
-      "left": 0,
-      "top": 0,
-      "width": 1280,
-      "height": 720
+      "left": -1120,
+      "top": 181,
+      "width": 320,
+      "height": 158
     },
     "fps_limit": 12.0
   },
