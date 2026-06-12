@@ -77,7 +77,9 @@ specific MSS monitor:
 python tools/calibrate_regions.py --monitor-index 2 --output config/regions_calibrated.json
 ```
 
-OpenCV will show a screenshot. Draw rectangles in this order: log, hero cards,
+OpenCV will show the screenshot fullscreen on the selected monitor so the OS
+window title bar does not offset the displayed image. Add `--windowed` only if
+you need a normal debug window. Draw rectangles in this order: log, hero cards,
 board cards, stack. Drag a rectangle, press Enter or Space to confirm it, press
 `C` to clear the current rectangle, and press `Q` or Esc when you are done. The
 tool converts the screenshot-local rectangles into global screen coordinates

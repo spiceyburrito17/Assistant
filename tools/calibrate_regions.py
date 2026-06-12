@@ -39,6 +39,11 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_OUTPUT_PATH,
         help="JSON path to write calibrated global screen regions.",
     )
+    parser.add_argument(
+        "--windowed",
+        action="store_true",
+        help="Show the calibration image in a normal window instead of fullscreen.",
+    )
     return parser.parse_args()
 
 
@@ -74,6 +79,8 @@ class ROISelector:
     screenshot_bgr: Any
     cv2: Any
     window_name: str
+    fullscreen: bool = True
+    window_origin: tuple[int, int] = (0, 0)
     rois: list[tuple[int, int, int, int]] = field(default_factory=list)
     drag_start: tuple[int, int] | None = None
     drag_current: tuple[int, int] | None = None
@@ -91,7 +98,7 @@ class ROISelector:
             self.is_dragging = False
 
     def run(self) -> tuple[tuple[int, int, int, int], ...]:
-        self.cv2.namedWindow(self.window_name, self.cv2.WINDOW_NORMAL)
+        self._configure_window()
         self.cv2.setMouseCallback(self.window_name, self.handle_mouse)
         try:
             while True:
@@ -106,6 +113,19 @@ class ROISelector:
         finally:
             self.cv2.destroyWindow(self.window_name)
         return tuple(self.rois)
+
+    def _configure_window(self) -> None:
+        self.cv2.namedWindow(self.window_name, self.cv2.WINDOW_NORMAL)
+        # Move the window onto the same monitor we captured before fullscreening.
+        # This avoids the OS title bar and keeps the displayed screenshot aligned
+        # with the pixel coordinates returned by the mouse callback.
+        self.cv2.moveWindow(self.window_name, self.window_origin[0], self.window_origin[1])
+        if self.fullscreen:
+            self.cv2.setWindowProperty(
+                self.window_name,
+                self.cv2.WND_PROP_FULLSCREEN,
+                self.cv2.WINDOW_FULLSCREEN,
+            )
 
     def _render(self) -> Any:
         image = self.screenshot_bgr.copy()
@@ -157,7 +177,11 @@ class ROISelector:
         return f"region_{index - len(REGION_NAMES)}"
 
 
-def select_regions(screenshot_bgr: Any) -> tuple[tuple[int, int, int, int], ...]:
+def select_regions(
+    screenshot_bgr: Any,
+    window_origin: tuple[int, int],
+    fullscreen: bool,
+) -> tuple[tuple[int, int, int, int], ...]:
     import cv2
 
     window_name = "Torn HUD region calibration - Q or Esc finishes"
@@ -165,8 +189,16 @@ def select_regions(screenshot_bgr: Any) -> tuple[tuple[int, int, int, int], ...]
     for index, name in enumerate(REGION_NAMES, start=1):
         print(f"  {index}. {name}")
     print("Draw additional ROIs after those if needed; they will be named region_0, region_1, ...")
+    mode = "fullscreen" if fullscreen else "windowed"
+    print(f"Opening calibration view in {mode} mode.")
     print("Drag an ROI, press Enter or Space to confirm it, press C to clear it, and press Q or Esc when done.")
-    return ROISelector(screenshot_bgr=screenshot_bgr, cv2=cv2, window_name=window_name).run()
+    return ROISelector(
+        screenshot_bgr=screenshot_bgr,
+        cv2=cv2,
+        window_name=window_name,
+        fullscreen=fullscreen,
+        window_origin=window_origin,
+    ).run()
 
 
 def label_regions(
@@ -211,7 +243,11 @@ def main() -> None:
     # scaled displays and easy to transpose. Drawing directly over the current
     # Torn layout produces detector-ready regions for logs, hero-card images,
     # board-card images, and stack/balance recognition.
-    rois = select_regions(screenshot)
+    rois = select_regions(
+        screenshot,
+        window_origin=(int(monitor["left"]), int(monitor["top"])),
+        fullscreen=not args.windowed,
+    )
     regions = label_regions(rois, monitor_left=int(monitor["left"]), monitor_top=int(monitor["top"]))
     write_regions(args.output, regions)
     print(json.dumps(regions, indent=2))

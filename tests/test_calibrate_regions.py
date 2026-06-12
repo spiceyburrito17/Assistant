@@ -63,9 +63,17 @@ class CalibrateRegionsTests(unittest.TestCase):
     def test_roi_selector_q_key_closes_window(self) -> None:
         module = _load_calibration_module()
         fake_cv2 = _FakeCv2(key=ord("q"))
-        selector = module.ROISelector(screenshot_bgr=_FakeImage(), cv2=fake_cv2, window_name="test")
+        selector = module.ROISelector(
+            screenshot_bgr=_FakeImage(),
+            cv2=fake_cv2,
+            window_name="test",
+            fullscreen=True,
+            window_origin=(-1920, 0),
+        )
         self.assertEqual(selector.run(), ())
         self.assertTrue(fake_cv2.destroyed)
+        self.assertEqual(fake_cv2.moved_to, (-1920, 0))
+        self.assertTrue(fake_cv2.fullscreen_enabled)
 
 
 class _FakeImage:
@@ -75,6 +83,8 @@ class _FakeImage:
 
 class _FakeCv2:
     WINDOW_NORMAL = 0
+    WND_PROP_FULLSCREEN = 1
+    WINDOW_FULLSCREEN = 2
     FONT_HERSHEY_SIMPLEX = 0
     EVENT_LBUTTONDOWN = 1
     EVENT_MOUSEMOVE = 2
@@ -83,9 +93,17 @@ class _FakeCv2:
     def __init__(self, key: int) -> None:
         self.key = key
         self.destroyed = False
+        self.moved_to: tuple[int, int] | None = None
+        self.fullscreen_enabled = False
 
     def namedWindow(self, _window_name: str, _flags: int) -> None:
         return None
+
+    def moveWindow(self, _window_name: str, x: int, y: int) -> None:
+        self.moved_to = (x, y)
+
+    def setWindowProperty(self, _window_name: str, prop_id: int, prop_value: int) -> None:
+        self.fullscreen_enabled = prop_id == self.WND_PROP_FULLSCREEN and prop_value == self.WINDOW_FULLSCREEN
 
     def setMouseCallback(self, _window_name: str, _callback: object) -> None:
         return None
