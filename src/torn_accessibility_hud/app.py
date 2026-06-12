@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-print("[DEBUG] app module import started", flush=True)
-
 import argparse
 import queue
 import threading
@@ -11,20 +9,25 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-print("[DEBUG] app module importing internal components", flush=True)
+from .diagnostics import configure_runtime_logging, debug_log, write_startup_log
+
+configure_runtime_logging()
+write_startup_log("app module import started")
+debug_log("app module import started")
+debug_log("app module importing internal components")
 
 from .config import AppConfig, write_default_config
 from .models import ActionType, EquityRequest, EquityResult, GameSnapshot, OCRBatch, OverlayState, ParsedEvent
 from .parsing.log_parser import ActionLogParser
 from .poker.equity import EquityWorker
 from .tracking.ledger import OpponentLedger
-print("[DEBUG] app module importing TkOverlay", flush=True)
+debug_log("app module importing TkOverlay")
 from .ui.overlay import TkOverlay
 from .ui.recommendation import RecommendationEngine
-print("[DEBUG] app module importing OCRWorker", flush=True)
+debug_log("app module importing OCRWorker")
 from .vision.ocr_engine import OCRWorker
 
-print("[DEBUG] app module import completed", flush=True)
+debug_log("app module import completed")
 
 
 class SnapshotBuilder:
@@ -178,25 +181,33 @@ class TornHudApplication:
     """Owns lifecycle for all background components."""
 
     def __init__(self, config: AppConfig) -> None:
-        print("[DEBUG] app startup: instantiating components", flush=True)
+        write_startup_log("app startup: instantiating components")
+        debug_log("app startup: instantiating components")
         self.config = config
-        print("[DEBUG] app startup: AppConfig assigned", flush=True)
+        write_startup_log("app startup: AppConfig assigned")
+        debug_log("app startup: AppConfig assigned")
         self.ocr_queue: queue.Queue[OCRBatch] = queue.Queue(maxsize=config.ocr.queue_size)
-        print("[DEBUG] app startup: OCR queue created", flush=True)
+        write_startup_log("app startup: OCR queue created")
+        debug_log("app startup: OCR queue created")
         self.equity_request_queue: queue.Queue[EquityRequest] = queue.Queue(maxsize=1)
-        print("[DEBUG] app startup: Equity request queue created", flush=True)
+        write_startup_log("app startup: Equity request queue created")
+        debug_log("app startup: Equity request queue created")
         self.equity_result_queue: queue.Queue[EquityResult] = queue.Queue(maxsize=1)
-        print("[DEBUG] app startup: Equity result queue created", flush=True)
+        write_startup_log("app startup: Equity result queue created")
+        debug_log("app startup: Equity result queue created")
         self.overlay = TkOverlay(config.overlay)
-        print("[DEBUG] app startup: TkOverlay created", flush=True)
+        write_startup_log("app startup: TkOverlay created")
+        debug_log("app startup: TkOverlay created")
         self.ocr_worker = OCRWorker(config, self.ocr_queue)
-        print("[DEBUG] app startup: OCRWorker created", flush=True)
+        write_startup_log("app startup: OCRWorker created")
+        debug_log("app startup: OCRWorker created")
         self.equity_worker = EquityWorker(
             self.equity_request_queue,
             self.equity_result_queue,
             seed=config.equity.random_seed,
         )
-        print("[DEBUG] app startup: EquityWorker created", flush=True)
+        write_startup_log("app startup: EquityWorker created")
+        debug_log("app startup: EquityWorker created")
         self.coordinator = CoordinatorWorker(
             config,
             self.ocr_queue,
@@ -204,18 +215,21 @@ class TornHudApplication:
             self.equity_result_queue,
             self.overlay,
         )
-        print("[DEBUG] app startup: CoordinatorWorker created", flush=True)
+        write_startup_log("app startup: CoordinatorWorker created")
+        debug_log("app startup: CoordinatorWorker created")
 
     def run(self) -> None:
-        print("[DEBUG] app startup: starting worker threads", flush=True)
-        print(f"[DEBUG] Starting thread: {_describe_thread(self.ocr_worker)}", flush=True)
+        write_startup_log("app startup: starting worker threads")
+        debug_log("app startup: starting worker threads")
+        debug_log("Starting thread: %s", _describe_thread(self.ocr_worker))
         self.ocr_worker.start()
-        print(f"[DEBUG] Starting thread: {_describe_thread(self.equity_worker)}", flush=True)
+        debug_log("Starting thread: %s", _describe_thread(self.equity_worker))
         self.equity_worker.start()
-        print(f"[DEBUG] Starting thread: {_describe_thread(self.coordinator)}", flush=True)
+        debug_log("Starting thread: %s", _describe_thread(self.coordinator))
         self.coordinator.start()
         try:
-            print("[DEBUG] app startup: starting TkOverlay mainloop component", flush=True)
+            write_startup_log("app startup: starting TkOverlay mainloop component")
+            debug_log("app startup: starting TkOverlay mainloop component")
             self.overlay.start()
         finally:
             self.stop()
@@ -249,17 +263,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    print("[DEBUG] app.main() entered", flush=True)
+    configure_runtime_logging()
+    write_startup_log("app.main() entered")
+    debug_log("app.main() entered")
     args = build_arg_parser().parse_args(argv)
-    print(f"[DEBUG] app.main() parsed args config={args.config}", flush=True)
+    write_startup_log(f"app.main() parsed args config={args.config}")
+    debug_log("app.main() parsed args config=%s", args.config)
     if args.write_default_config:
         path = write_default_config(args.write_default_config)
         print(f"Wrote default config to {path}")
         return 0
     config = AppConfig.load(args.config if args.config.exists() else None)
-    print("[DEBUG] app.main() AppConfig loaded", flush=True)
+    write_startup_log("app.main() AppConfig loaded")
+    debug_log("app.main() AppConfig loaded")
     app = TornHudApplication(config)
-    print("[DEBUG] app.main() TornHudApplication created", flush=True)
+    write_startup_log("app.main() TornHudApplication created")
+    debug_log("app.main() TornHudApplication created")
     try:
         app.run()
     except KeyboardInterrupt:

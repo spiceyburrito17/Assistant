@@ -5,13 +5,13 @@ from __future__ import annotations
 import queue
 import threading
 import time
-import traceback
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from ..config import AppConfig, OCRConfig, RegionsConfig
+from ..diagnostics import debug_log, exception_log, write_startup_log
 from ..models import OCRBatch, OCRLine
 from .capture import ScreenCapture
 from .debounce import StableFrameDebouncer
@@ -30,17 +30,13 @@ class EasyOCREngine:
     def reader(self) -> Any:
         if self._reader is None:
             try:
-                print(
-                    f"[DEBUG] EasyOCR Reader initializing languages={self.config.languages} gpu={self.config.gpu}",
-                    flush=True,
-                )
+                debug_log("EasyOCR Reader initializing languages=%s gpu=%s", self.config.languages, self.config.gpu)
                 import easyocr
 
                 self._reader = easyocr.Reader(list(self.config.languages), gpu=self.config.gpu)
-                print("[DEBUG] EasyOCR Reader initialized successfully", flush=True)
+                debug_log("EasyOCR Reader initialized successfully")
             except Exception as exc:  # noqa: BLE001 - print daemon-thread init failures
-                print(f"[DEBUG] EasyOCR Reader initialization FAILED: {exc}", flush=True)
-                traceback.print_exc()
+                exception_log("EasyOCR Reader initialization FAILED: %s", exc)
                 raise
         return self._reader
 
@@ -455,30 +451,32 @@ class CardRegionDebugger:
         ocr: EasyOCREngine,
         frame_id: int,
     ) -> tuple[OCRLine, ...]:
-        print(f"[DEBUG] card_detector called frame={frame_id}", flush=True)
+        debug_log("card_detector called frame=%s", frame_id)
         if not self.enabled:
-            print(
-                "[DEBUG] card_detector disabled: "
-                f"debug_card_regions={self.config.debug_card_regions} loaded_regions={sorted(self.regions)}",
-                flush=True,
+            debug_log(
+                "card_detector disabled: debug_card_regions=%s loaded_regions=%s",
+                self.config.debug_card_regions,
+                sorted(self.regions),
             )
             return ()
         interval = max(self.config.debug_card_regions_interval_sec, 0.1)
         should_process = time.monotonic() - self.last_saved_at >= interval
         if not should_process:
-            print(f"[DEBUG] card_detector throttled frame={frame_id} interval={interval:.2f}s", flush=True)
+            debug_log("card_detector throttled frame=%s interval=%.2fs", frame_id, interval)
             return ()
         diagnostic_lines: list[OCRLine] = []
         for region_name, label in self.REGION_ATTRS:
             region = self.regions.get(region_name)
             if region is None:
-                print(f"[DEBUG] card_detector region missing frame={frame_id} region={region_name}", flush=True)
+                debug_log("card_detector region missing frame=%s region=%s", frame_id, region_name)
                 continue
             raw = capture.grab_region(region)
-            print(
-                f"[DEBUG] card_detector crop frame={frame_id} region={region_name} "
-                f"size={raw.shape[1]}x{raw.shape[0]} px",
-                flush=True,
+            debug_log(
+                "card_detector crop frame=%s region=%s size=%sx%s px",
+                frame_id,
+                region_name,
+                raw.shape[1],
+                raw.shape[0],
             )
             prefix = self._debug_prefix(region_name, frame_id)
             header_lines = self._debug_header(frame_id, region_name, raw)
@@ -487,10 +485,7 @@ class CardRegionDebugger:
                 if raw.size == 0 or raw.shape[0] == 0 or raw.shape[1] == 0:
                     zero_lines = (*header_lines, "[detector] SKIPPED - captured region is 0x0 pixels")
                     self._write_debug_text(prefix, zero_lines)
-                    print(
-                        f"[DEBUG] card_detector skipped frame={frame_id} region={region_name}: 0x0 crop",
-                        flush=True,
-                    )
+                    debug_log("card_detector skipped frame=%s region=%s: 0x0 crop", frame_id, region_name)
                     continue
                 processed = preprocess_card_region(raw, scale=self.config.card_ocr_scale)
                 region_raw_ocr = ocr.read_raw(processed, allowlist=self.config.card_ocr_allowlist)
@@ -595,7 +590,8 @@ class OCRWorker(threading.Thread):
     """Capture, debounce, and OCR frames without blocking Tkinter."""
 
     def __init__(self, app_config: AppConfig, output_queue: queue.Queue[OCRBatch]) -> None:
-        print("[DEBUG] OCRWorker._init_ called", flush=True)
+        write_startup_log("OCRWorker.__init__ called")
+        debug_log("OCRWorker.__init__ called")
         super().__init__(name="torn-ocr-worker", daemon=True)
         self.app_config = app_config
         self.output_queue = output_queue
@@ -609,7 +605,8 @@ class OCRWorker(threading.Thread):
         self.stop_event.set()
 
     def run(self) -> None:
-        print("[DEBUG] OCRWorker.run() started", flush=True)
+        write_startup_log("OCRWorker.run() started")
+        debug_log("OCRWorker.run() started")
         capture: ScreenCapture | None = None
         try:
             capture = ScreenCapture(self.app_config.capture)
@@ -636,11 +633,12 @@ class OCRWorker(threading.Thread):
                                 if card_debugger.last_error:
                                     self.last_error = card_debugger.last_error
                             else:
-                                print(
-                                    f"[DEBUG] frame {self._capture_frame_id} dropped: "
-                                    f"reason={debounce.reason} stable_count={debounce.stable_count} "
-                                    f"motion_score={debounce.motion_score:.3f}",
-                                    flush=True,
+                                debug_log(
+                                    "frame %s dropped: reason=%s stable_count=%s motion_score=%.3f",
+                                    self._capture_frame_id,
+                                    debounce.reason,
+                                    debounce.stable_count,
+                                    debounce.motion_score,
                                 )
                                 card_debugger.write_stability_skip(capture, self._capture_frame_id, debounce.reason)
                                 if card_lines:
@@ -653,8 +651,7 @@ class OCRWorker(threading.Thread):
                                     )
                         except Exception as exc:  # noqa: BLE001 - worker must not kill the UI loop
                             self.last_error = f"{type(exc).__name__}: {exc}"
-                            print(f"[DEBUG] OCRWorker loop exception: {exc}", flush=True)
-                            traceback.print_exc()
+                            exception_log("OCRWorker loop exception: %s", exc)
                             time.sleep(0.25)
                         elapsed = time.monotonic() - started
                         if elapsed < min_interval:
@@ -663,8 +660,7 @@ class OCRWorker(threading.Thread):
                 capture.close()
         except Exception as exc:  # noqa: BLE001 - daemon thread must expose startup crashes
             self.last_error = f"{type(exc).__name__}: {exc}"
-            print(f"[DEBUG] OCRWorker.run() CRASHED: {exc}", flush=True)
-            traceback.print_exc()
+            exception_log("OCRWorker.run() CRASHED: %s", exc)
         finally:
             if capture is not None:
                 capture.close()
