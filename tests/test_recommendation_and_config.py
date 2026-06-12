@@ -28,7 +28,15 @@ class RecommendationAndConfigTests(unittest.TestCase):
                 json.dumps(
                     {
                         "capture": {"region": {"left": 10, "top": 20, "width": 300, "height": 200}},
-                        "ocr": {"languages": ["en"], "gpu": True},
+                        "ocr": {
+                            "languages": ["en"],
+                            "gpu": True,
+                            "debug_card_regions": True,
+                            "debug_card_regions_dir": "debug_captures/test_cards",
+                            "debug_card_regions_interval_sec": 1.5,
+                            "card_ocr_scale": 4.0,
+                            "card_ocr_allowlist": "AKQJ",
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -37,6 +45,11 @@ class RecommendationAndConfigTests(unittest.TestCase):
         self.assertEqual(config.capture.region.left, 10)
         self.assertTrue(config.ocr.gpu)
         self.assertEqual(config.ocr.languages, ("en",))
+        self.assertTrue(config.ocr.debug_card_regions)
+        self.assertEqual(config.ocr.debug_card_regions_dir, "debug_captures/test_cards")
+        self.assertEqual(config.ocr.debug_card_regions_interval_sec, 1.5)
+        self.assertEqual(config.ocr.card_ocr_scale, 4.0)
+        self.assertEqual(config.ocr.card_ocr_allowlist, "AKQJ")
 
     def test_regions_config_loads_named_regions_and_extras(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

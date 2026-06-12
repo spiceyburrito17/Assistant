@@ -39,6 +39,12 @@ class OCRConfig:
     min_confidence: float = 0.48
     paragraph: bool = False
     queue_size: int = 2
+    calibrated_regions_path: str | None = "config/regions_calibrated.json"
+    debug_card_regions: bool = True
+    debug_card_regions_dir: str = "debug_captures/card_regions"
+    debug_card_regions_interval_sec: float = 2.0
+    card_ocr_scale: float = 3.0
+    card_ocr_allowlist: str = "A23456789TJQK10cdhsCDHS"
 
 
 @dataclass(frozen=True)
@@ -226,6 +232,12 @@ def write_default_config(path: str | Path) -> Path:
             "min_confidence": 0.48,
             "paragraph": False,
             "queue_size": 2,
+            "calibrated_regions_path": "config/regions_calibrated.json",
+            "debug_card_regions": True,
+            "debug_card_regions_dir": "debug_captures/card_regions",
+            "debug_card_regions_interval_sec": 2.0,
+            "card_ocr_scale": 3.0,
+            "card_ocr_allowlist": "A23456789TJQK10cdhsCDHS",
         },
         "parser": {
             "max_reasonable_amount": 10000000.0,

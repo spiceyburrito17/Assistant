@@ -5,5 +5,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+debug_captures/
 dist/
 build/

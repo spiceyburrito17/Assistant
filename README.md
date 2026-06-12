@@ -92,6 +92,14 @@ As a first integration step, copy `log_region` from
 `RegionsConfig` helper and are reserved for later image-based hero/board/stack
 recognition.
 
+The current calibrated boxes are hardcoded in `config/regions_calibrated.json`.
+If card OCR misses hero or board cards, rerun `python tools/calibrate_regions.py`
+and redraw `hero_cards_region` and `board_cards_region` tightly around the card
+faces. While `ocr.debug_card_regions` is enabled, the OCR worker also saves raw
+and preprocessed hero/board crops plus OCR text under
+`debug_captures/card_regions/`. Use those images to confirm whether a failure is
+caused by shifted coordinates or by unreadable card glyphs.
+
 ## Tests
 
 The deterministic tests avoid screen capture, EasyOCR, and Treys imports:
