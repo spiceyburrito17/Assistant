@@ -31,17 +31,23 @@ class EasyOCREngine:
             self._reader = easyocr.Reader(list(self.config.languages), gpu=self.config.gpu)
         return self._reader
 
-    def read(self, frame: np.ndarray[Any, Any], allowlist: str | None = None) -> tuple[OCRLine, ...]:
+    def read(
+        self,
+        frame: np.ndarray[Any, Any],
+        allowlist: str | None = None,
+        min_confidence: float | None = None,
+    ) -> tuple[OCRLine, ...]:
         kwargs: dict[str, Any] = {"detail": 1, "paragraph": self.config.paragraph}
         if allowlist:
             kwargs["allowlist"] = allowlist
         results = self.reader.readtext(frame, **kwargs)
         lines: list[OCRLine] = []
+        confidence_floor = self.config.min_confidence if min_confidence is None else min_confidence
         for result in results:
             if len(result) < 3:
                 continue
             bbox_raw, text, confidence = result[0], str(result[1]), float(result[2])
-            if confidence < self.config.min_confidence:
+            if confidence < confidence_floor:
                 continue
             bbox = tuple((int(point[0]), int(point[1])) for point in bbox_raw)
             lines.append(OCRLine(text=text, confidence=confidence, bbox=bbox))
@@ -84,6 +90,43 @@ def detect_suit_from_card_image(card_bgr: np.ndarray[Any, Any]) -> str | None:
     return best_suit if best_score >= 8 else None
 
 
+def is_probably_card_back(card_bgr: np.ndarray[Any, Any]) -> bool:
+    """Detect Torn card backs so unrevealed board cards are ignored."""
+
+    import cv2
+
+    if card_bgr.size == 0:
+        return True
+    hsv = cv2.cvtColor(card_bgr, cv2.COLOR_BGR2HSV)
+    white_pixels = int(cv2.inRange(hsv, (0, 0, 160), (180, 65, 255)).sum() // 255)
+    card_area = card_bgr.shape[0] * card_bgr.shape[1]
+    white_ratio = white_pixels / max(card_area, 1)
+    gray = cv2.cvtColor(card_bgr, cv2.COLOR_BGR2GRAY)
+    dark_pixels = int(cv2.inRange(gray, 0, 95).sum() // 255)
+    # Face-up cards have a large white field and rank/suit glyphs. Card backs
+    # are patterned grey/green and become edge-heavy after thresholding.
+    return white_ratio < 0.45 or dark_pixels / max(card_area, 1) > 0.45
+
+
+def is_probably_folded_hero_region(region_bgr: np.ndarray[Any, Any]) -> bool:
+    """Detect the greyed/line-through folded hero state shown by Torn."""
+
+    import cv2
+
+    if region_bgr.size == 0:
+        return False
+    hsv = cv2.cvtColor(region_bgr, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+    low_saturation_ratio = float(np.mean(saturation < 45))
+    dim_ratio = float(np.mean(value < 150))
+    upper = region_bgr[: max(1, int(region_bgr.shape[0] * 0.35))]
+    upper_gray = cv2.cvtColor(upper, cv2.COLOR_BGR2GRAY)
+    row_darkness = np.mean(upper_gray < 120, axis=1)
+    has_long_horizontal_overlay = bool(np.any(row_darkness > 0.55))
+    return (low_saturation_ratio > 0.55 and dim_ratio > 0.35) or has_long_horizontal_overlay
+
+
 def find_card_face_crops(region_bgr: np.ndarray[Any, Any]) -> tuple[np.ndarray[Any, Any], ...]:
     """Find likely face-up white card rectangles in a hero/board region."""
 
@@ -96,7 +139,7 @@ def find_card_face_crops(region_bgr: np.ndarray[Any, Any]) -> tuple[np.ndarray[A
     kernel = np.ones((3, 3), dtype=np.uint8)
     white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
     contours, _hierarchy = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    crops: list[tuple[int, np.ndarray[Any, Any]]] = []
+    boxes: list[tuple[int, int, int, int]] = []
     region_area = region_bgr.shape[0] * region_bgr.shape[1]
     for contour in contours:
         x, y, width, height = cv2.boundingRect(contour)
@@ -108,23 +151,80 @@ def find_card_face_crops(region_bgr: np.ndarray[Any, Any]) -> tuple[np.ndarray[A
         aspect = width / max(height, 1)
         if not 0.35 <= aspect <= 0.95:
             continue
+        boxes.append((x, y, width, height))
+    merged = _merge_overlapping_boxes(boxes)
+    crops: list[tuple[int, np.ndarray[Any, Any]]] = []
+    for x, y, width, height in merged:
         crop = region_bgr[y : y + height, x : x + width]
+        if is_probably_card_back(crop):
+            continue
         crops.append((x, crop))
     return tuple(crop for _x, crop in sorted(crops, key=lambda item: item[0]))
+
+
+def _merge_overlapping_boxes(boxes: list[tuple[int, int, int, int]]) -> list[tuple[int, int, int, int]]:
+    merged: list[tuple[int, int, int, int]] = []
+    for box in sorted(boxes, key=lambda item: item[0]):
+        x, y, width, height = box
+        if not merged:
+            merged.append(box)
+            continue
+        last_x, last_y, last_width, last_height = merged[-1]
+        horizontal_overlap = min(last_x + last_width, x + width) - max(last_x, x)
+        if horizontal_overlap > 0:
+            x1 = min(last_x, x)
+            y1 = min(last_y, y)
+            x2 = max(last_x + last_width, x + width)
+            y2 = max(last_y + last_height, y + height)
+            merged[-1] = (x1, y1, x2 - x1, y2 - y1)
+        else:
+            merged.append(box)
+    return merged
+
+
+def read_card_rank_from_crop(card_bgr: np.ndarray[Any, Any], ocr: EasyOCREngine, scale: float) -> str | None:
+    """OCR a card rank using multiple corner crops and threshold variants."""
+
+    if card_bgr.size == 0:
+        return None
+    height, width = card_bgr.shape[:2]
+    crop_specs = (
+        (0.00, 0.00, 0.45, 0.36),
+        (0.00, 0.00, 0.55, 0.45),
+        (0.00, 0.00, 0.70, 0.32),
+    )
+    for x0, y0, x1, y1 in crop_specs:
+        crop = card_bgr[int(height * y0) : max(1, int(height * y1)), int(width * x0) : max(1, int(width * x1))]
+        variants = (preprocess_card_region(crop, scale=scale), _preprocess_rank_light(crop, scale=scale))
+        for variant in variants:
+            for line in ocr.read(variant, allowlist="A23456789TJQK10", min_confidence=0.05):
+                rank = normalize_card_rank(line.text)
+                if rank is not None:
+                    return rank
+    return None
+
+
+def _preprocess_rank_light(frame: np.ndarray[Any, Any], scale: float) -> np.ndarray[Any, np.dtype[np.uint8]]:
+    import cv2
+
+    resized = cv2.resize(frame, None, fx=max(scale, 1.0), fy=max(scale, 1.0), interpolation=cv2.INTER_CUBIC)
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    _threshold, binary = cv2.threshold(gray, 145, 255, cv2.THRESH_BINARY)
+    return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
 
 
 def detect_cards_from_region(
     region_bgr: np.ndarray[Any, Any],
     ocr: EasyOCREngine,
     scale: float,
+    ignore_folded: bool = False,
 ) -> tuple[str, ...]:
+    if ignore_folded and is_probably_folded_hero_region(region_bgr):
+        return ()
     cards: list[str] = []
     seen: set[str] = set()
     for crop in find_card_face_crops(region_bgr):
-        rank_crop = crop[: max(1, int(crop.shape[0] * 0.42)), : max(1, int(crop.shape[1] * 0.50))]
-        processed = preprocess_card_region(rank_crop, scale=scale)
-        rank_lines = ocr.read(processed, allowlist="A23456789TJQK10")
-        rank = next((normalize_card_rank(line.text) for line in rank_lines if normalize_card_rank(line.text)), None)
+        rank = read_card_rank_from_crop(crop, ocr, scale=scale)
         suit = detect_suit_from_card_image(crop)
         if rank is None or suit is None:
             continue
@@ -208,7 +308,12 @@ class CardRegionDebugger:
                 continue
             raw = capture.grab_region(region)
             processed = preprocess_card_region(raw, scale=self.config.card_ocr_scale)
-            detected_cards = detect_cards_from_region(raw, ocr, scale=self.config.card_ocr_scale)
+            detected_cards = detect_cards_from_region(
+                raw,
+                ocr,
+                scale=self.config.card_ocr_scale,
+                ignore_folded=region_name == "hero_cards_region",
+            )
             expected_cards = 2 if region_name == "hero_cards_region" else 3
             max_cards = 2 if region_name == "hero_cards_region" else 5
             diagnostic_lines_for_file = tuple(

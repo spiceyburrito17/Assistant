@@ -3,7 +3,12 @@ import unittest
 
 import numpy as np
 
-from torn_accessibility_hud.vision.ocr_engine import detect_suit_from_card_image, normalize_card_rank
+from torn_accessibility_hud.vision.ocr_engine import (
+    detect_suit_from_card_image,
+    is_probably_card_back,
+    is_probably_folded_hero_region,
+    normalize_card_rank,
+)
 
 
 class CardImageDetectionTests(unittest.TestCase):
@@ -19,6 +24,17 @@ class CardImageDetectionTests(unittest.TestCase):
         self.assertEqual(detect_suit_from_card_image(self._card_with_glyph((210, 80, 0))), "d")
         self.assertEqual(detect_suit_from_card_image(self._card_with_glyph((0, 160, 0))), "c")
         self.assertEqual(detect_suit_from_card_image(self._card_with_glyph((20, 20, 20))), "s")
+
+    @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
+    def test_card_back_and_folded_hero_guards(self) -> None:
+        face_up = self._card_with_glyph((0, 0, 210))
+        patterned_back = np.full((80, 55, 3), 120, dtype=np.uint8)
+        patterned_back[:, ::4] = 230
+        folded = np.full((90, 120, 3), 135, dtype=np.uint8)
+        folded[18:24, :] = 70
+        self.assertFalse(is_probably_card_back(face_up))
+        self.assertTrue(is_probably_card_back(patterned_back))
+        self.assertTrue(is_probably_folded_hero_region(folded))
 
     @staticmethod
     def _card_with_glyph(color_bgr: tuple[int, int, int]) -> np.ndarray:
