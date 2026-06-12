@@ -104,6 +104,8 @@ For manual tuning, `config/default_config.json` also supports explicit
 `ocr.hero_cards_region` to the bottom-centre player area where your two face-up
 hole cards appear. Hero card capture is not gated by the scrolling-log stable
 frame debounce and uses `ocr.hero_cards_interval_sec` (`0.0` means every tick).
+The hero folded/greyed guard is disabled because Torn's dark/inverted card theme
+can make live hero cards look visually similar to folded cards.
 Hero/board detection looks for face-up white card rectangles, OCRs only each
 rank corner, and infers suits from glyph color. It emits hero cards only when
 two cards are detected and board cards only when three to five cards are

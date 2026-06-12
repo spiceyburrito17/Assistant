@@ -496,7 +496,7 @@ class CardRegionDebugger:
                     raw,
                     ocr,
                     scale=self.config.card_ocr_scale,
-                    ignore_folded=region_name == "hero_cards_region",
+                    ignore_folded=False,
                 )
                 expected_cards = 2 if region_name == "hero_cards_region" else 3
                 max_cards = 2 if region_name == "hero_cards_region" else 5
@@ -508,6 +508,7 @@ class CardRegionDebugger:
                         region_raw_ocr,
                         allowlist=self.config.card_ocr_allowlist,
                     ),
+                    *self._folded_gate_debug_lines(region_name),
                     *debug_lines_for_file,
                     f"[detected_cards] {' '.join(detected_cards) if detected_cards else '<none>'}",
                 )
@@ -530,6 +531,14 @@ class CardRegionDebugger:
         if region_name == "hero_cards_region":
             return max(self.config.hero_cards_interval_sec, 0.0)
         return max(self.config.debug_card_regions_interval_sec, 0.1)
+
+    @staticmethod
+    def _folded_gate_debug_lines(region_name: str) -> tuple[str, ...]:
+        if region_name != "hero_cards_region":
+            return ()
+        return (
+            "[hero folded guard] disabled - Torn dark/inverted card theme can look greyed; attempting OCR anyway",
+        )
 
     def _debug_prefix(self, region_name: str, frame_id: int) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)
