@@ -35,7 +35,7 @@ class RecommendationAndConfigTests(unittest.TestCase):
                             "debug_card_regions_dir": "debug_captures/test_cards",
                             "debug_card_regions_interval_sec": 1.5,
                             "card_ocr_scale": 4.0,
-                            "card_ocr_allowlist": "AKQJ",
+                            "card_ocr_allowlist": "0123456789AaKkQqJjTt",
                         },
                     }
                 ),
@@ -49,7 +49,7 @@ class RecommendationAndConfigTests(unittest.TestCase):
         self.assertEqual(config.ocr.debug_card_regions_dir, "debug_captures/test_cards")
         self.assertEqual(config.ocr.debug_card_regions_interval_sec, 1.5)
         self.assertEqual(config.ocr.card_ocr_scale, 4.0)
-        self.assertEqual(config.ocr.card_ocr_allowlist, "AKQJ")
+        self.assertEqual(config.ocr.card_ocr_allowlist, "0123456789AaKkQqJjTt")
 
     def test_regions_config_loads_named_regions_and_extras(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

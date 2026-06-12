@@ -44,7 +44,7 @@ class OCRConfig:
     debug_card_regions_dir: str = "debug_captures/card_regions"
     debug_card_regions_interval_sec: float = 2.0
     card_ocr_scale: float = 3.0
-    card_ocr_allowlist: str = "A23456789TJQK10cdhsCDHS"
+    card_ocr_allowlist: str = "0123456789AaKkQqJjTtCDHScdhs"
 
 
 @dataclass(frozen=True)
@@ -237,7 +237,7 @@ def write_default_config(path: str | Path) -> Path:
             "debug_card_regions_dir": "debug_captures/card_regions",
             "debug_card_regions_interval_sec": 2.0,
             "card_ocr_scale": 3.0,
-            "card_ocr_allowlist": "A23456789TJQK10cdhsCDHS",
+            "card_ocr_allowlist": "0123456789AaKkQqJjTtCDHScdhs",
         },
         "parser": {
             "max_reasonable_amount": 10000000.0,

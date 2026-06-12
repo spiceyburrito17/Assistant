@@ -15,6 +15,8 @@ from ..models import OCRBatch, OCRLine
 from .capture import ScreenCapture
 from .debounce import StableFrameDebouncer
 
+CARD_RANK_ALLOWLIST = "0123456789AaKkQqJjTt"
+
 
 class EasyOCREngine:
     """Lazy EasyOCR wrapper configured for local GPU acceleration."""
@@ -37,18 +39,22 @@ class EasyOCREngine:
         allowlist: str | None = None,
         min_confidence: float | None = None,
     ) -> tuple[OCRLine, ...]:
+        raw_lines = self.read_raw(frame, allowlist=allowlist)
+        confidence_floor = self.config.min_confidence if min_confidence is None else min_confidence
+        return tuple(line for line in raw_lines if line.confidence >= confidence_floor)
+
+    def read_raw(self, frame: np.ndarray[Any, Any], allowlist: str | None = None) -> tuple[OCRLine, ...]:
+        """Return EasyOCR results before any confidence filtering."""
+
         kwargs: dict[str, Any] = {"detail": 1, "paragraph": self.config.paragraph}
         if allowlist:
             kwargs["allowlist"] = allowlist
         results = self.reader.readtext(frame, **kwargs)
         lines: list[OCRLine] = []
-        confidence_floor = self.config.min_confidence if min_confidence is None else min_confidence
         for result in results:
             if len(result) < 3:
                 continue
             bbox_raw, text, confidence = result[0], str(result[1]), float(result[2])
-            if confidence < confidence_floor:
-                continue
             bbox = tuple((int(point[0]), int(point[1])) for point in bbox_raw)
             lines.append(OCRLine(text=text, confidence=confidence, bbox=bbox))
         return tuple(sorted(lines, key=lambda line: (line.bbox[0][1] if line.bbox else 0, line.bbox[0][0] if line.bbox else 0)))
@@ -66,6 +72,18 @@ def normalize_card_rank(raw_text: str) -> str | None:
     if cleaned in {"2", "3", "4", "5", "6", "7", "8", "9"}:
         return cleaned
     return None
+
+
+def format_raw_ocr_debug_lines(label: str, lines: tuple[OCRLine, ...], allowlist: str | None) -> tuple[str, ...]:
+    debug_lines = [f"[{label}] allowlist={allowlist or '<none>'} raw_count={len(lines)}"]
+    if not lines:
+        debug_lines.append("  (no raw OCR results)")
+        return tuple(debug_lines)
+    for index, line in enumerate(lines):
+        debug_lines.append(
+            f"  #{index} text={line.text!r} confidence={line.confidence:.4f} bbox={line.bbox}"
+        )
+    return tuple(debug_lines)
 
 
 def detect_suit_from_card_image(card_bgr: np.ndarray[Any, Any]) -> str | None:
@@ -185,23 +203,49 @@ def _merge_overlapping_boxes(boxes: list[tuple[int, int, int, int]]) -> list[tup
 def read_card_rank_from_crop(card_bgr: np.ndarray[Any, Any], ocr: EasyOCREngine, scale: float) -> str | None:
     """OCR a card rank using multiple corner crops and threshold variants."""
 
+    rank, _debug_lines = read_card_rank_from_crop_with_debug(card_bgr, ocr, scale=scale, crop_label="card")
+    return rank
+
+
+def read_card_rank_from_crop_with_debug(
+    card_bgr: np.ndarray[Any, Any],
+    ocr: EasyOCREngine,
+    scale: float,
+    crop_label: str,
+) -> tuple[str | None, tuple[str, ...]]:
+    """OCR a card rank and return raw EasyOCR diagnostics for every variant."""
+
     if card_bgr.size == 0:
-        return None
+        return None, (f"[{crop_label}] empty card crop",)
     height, width = card_bgr.shape[:2]
     crop_specs = (
         (0.00, 0.00, 0.45, 0.36),
         (0.00, 0.00, 0.55, 0.45),
         (0.00, 0.00, 0.70, 0.32),
     )
-    for x0, y0, x1, y1 in crop_specs:
+    debug_lines: list[str] = []
+    for crop_index, (x0, y0, x1, y1) in enumerate(crop_specs):
         crop = card_bgr[int(height * y0) : max(1, int(height * y1)), int(width * x0) : max(1, int(width * x1))]
-        variants = (preprocess_card_region(crop, scale=scale), _preprocess_rank_light(crop, scale=scale))
-        for variant in variants:
-            for line in ocr.read(variant, allowlist="A23456789TJQK10", min_confidence=0.05):
+        variants = (
+            ("adaptive_dark_on_light", preprocess_card_region(crop, scale=scale)),
+            ("simple_dark_on_light", _preprocess_rank_light(crop, scale=scale)),
+        )
+        for variant_name, variant in variants:
+            raw_lines = ocr.read_raw(variant, allowlist=CARD_RANK_ALLOWLIST)
+            debug_lines.extend(
+                format_raw_ocr_debug_lines(
+                    f"{crop_label}.rank_crop_{crop_index}.{variant_name}",
+                    raw_lines,
+                    allowlist=CARD_RANK_ALLOWLIST,
+                )
+            )
+            for line in raw_lines:
+                if line.confidence < 0.15:
+                    continue
                 rank = normalize_card_rank(line.text)
                 if rank is not None:
-                    return rank
-    return None
+                    return rank, tuple(debug_lines)
+    return None, tuple(debug_lines)
 
 
 def _preprocess_rank_light(frame: np.ndarray[Any, Any], scale: float) -> np.ndarray[Any, np.dtype[np.uint8]]:
@@ -210,7 +254,15 @@ def _preprocess_rank_light(frame: np.ndarray[Any, Any], scale: float) -> np.ndar
     resized = cv2.resize(frame, None, fx=max(scale, 1.0), fy=max(scale, 1.0), interpolation=cv2.INTER_CUBIC)
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
     _threshold, binary = cv2.threshold(gray, 145, 255, cv2.THRESH_BINARY)
-    return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+    return cv2.cvtColor(_ensure_dark_text_on_light(binary), cv2.COLOR_GRAY2BGR)
+
+
+def _ensure_dark_text_on_light(gray: np.ndarray[Any, Any]) -> np.ndarray[Any, np.dtype[np.uint8]]:
+    import cv2
+
+    if float(np.mean(gray)) < 127.0:
+        return cv2.bitwise_not(gray)
+    return gray
 
 
 def detect_cards_from_region(
@@ -218,21 +270,31 @@ def detect_cards_from_region(
     ocr: EasyOCREngine,
     scale: float,
     ignore_folded: bool = False,
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if ignore_folded and is_probably_folded_hero_region(region_bgr):
-        return ()
+        return (), ("[detector] folded/greyed hero region detected; ignoring hero cards",)
     cards: list[str] = []
     seen: set[str] = set()
-    for crop in find_card_face_crops(region_bgr):
-        rank = read_card_rank_from_crop(crop, ocr, scale=scale)
+    debug_lines: list[str] = []
+    crops = find_card_face_crops(region_bgr)
+    debug_lines.append(f"[detector] face_up_card_crops={len(crops)}")
+    for crop_index, crop in enumerate(crops):
+        rank, rank_debug_lines = read_card_rank_from_crop_with_debug(
+            crop,
+            ocr,
+            scale=scale,
+            crop_label=f"card_{crop_index}",
+        )
+        debug_lines.extend(rank_debug_lines)
         suit = detect_suit_from_card_image(crop)
+        debug_lines.append(f"[card_{crop_index}.result] rank={rank or 'None'} suit={suit or 'None'}")
         if rank is None or suit is None:
             continue
         card = f"{rank}{suit}"
         if card not in seen:
             cards.append(card)
             seen.add(card)
-    return tuple(cards)
+    return tuple(cards), tuple(debug_lines)
 
 
 def preprocess_card_region(
@@ -266,7 +328,7 @@ def preprocess_card_region(
     )
     sharpen_kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
     sharpened = cv2.filter2D(thresholded, -1, sharpen_kernel)
-    return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
+    return cv2.cvtColor(_ensure_dark_text_on_light(sharpened), cv2.COLOR_GRAY2BGR)
 
 
 class CardRegionDebugger:
@@ -308,7 +370,8 @@ class CardRegionDebugger:
                 continue
             raw = capture.grab_region(region)
             processed = preprocess_card_region(raw, scale=self.config.card_ocr_scale)
-            detected_cards = detect_cards_from_region(
+            region_raw_ocr = ocr.read_raw(processed, allowlist=self.config.card_ocr_allowlist)
+            detected_cards, debug_lines_for_file = detect_cards_from_region(
                 raw,
                 ocr,
                 scale=self.config.card_ocr_scale,
@@ -316,8 +379,14 @@ class CardRegionDebugger:
             )
             expected_cards = 2 if region_name == "hero_cards_region" else 3
             max_cards = 2 if region_name == "hero_cards_region" else 5
-            diagnostic_lines_for_file = tuple(
-                OCRLine(text=card, confidence=1.0) for card in detected_cards
+            all_debug_lines = (
+                *format_raw_ocr_debug_lines(
+                    f"{region_name}.region_preprocessed",
+                    region_raw_ocr,
+                    allowlist=self.config.card_ocr_allowlist,
+                ),
+                *debug_lines_for_file,
+                f"[detected_cards] {' '.join(detected_cards) if detected_cards else '<none>'}",
             )
             if expected_cards <= len(detected_cards) <= max_cards and detected_cards != self.last_detected.get(region_name):
                 diagnostic_text = " ".join(detected_cards)
@@ -325,7 +394,7 @@ class CardRegionDebugger:
                     OCRLine(text=f"{label}: {diagnostic_text}", confidence=1.0)
                 )
                 self.last_detected[region_name] = detected_cards
-            self._save_debug_images(region_name, frame_id, raw, processed, diagnostic_lines_for_file)
+            self._save_debug_images(region_name, frame_id, raw, processed, all_debug_lines)
         self.last_saved_at = time.monotonic()
         return tuple(diagnostic_lines)
 
@@ -335,7 +404,7 @@ class CardRegionDebugger:
         frame_id: int,
         raw: np.ndarray[Any, Any],
         processed: np.ndarray[Any, Any],
-        lines: tuple[OCRLine, ...],
+        debug_lines: tuple[str, ...],
     ) -> None:
         import cv2
 
@@ -344,8 +413,8 @@ class CardRegionDebugger:
         cv2.imwrite(str(prefix.with_name(f"{prefix.name}_raw.png")), raw)
         cv2.imwrite(str(prefix.with_name(f"{prefix.name}_preprocessed.png")), processed)
         with prefix.with_name(f"{prefix.name}_ocr.txt").open("w", encoding="utf-8") as fp:
-            for line in lines:
-                fp.write(f"{line.confidence:.3f}\t{line.text}\n")
+            for line in debug_lines:
+                fp.write(f"{line}\n")
 
     def _load_regions(self, path: str | None) -> dict[str, Any]:
         if not path:

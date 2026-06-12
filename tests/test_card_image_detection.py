@@ -5,10 +5,12 @@ import numpy as np
 
 from torn_accessibility_hud.vision.ocr_engine import (
     detect_suit_from_card_image,
+    format_raw_ocr_debug_lines,
     is_probably_card_back,
     is_probably_folded_hero_region,
     normalize_card_rank,
 )
+from torn_accessibility_hud.models import OCRLine
 
 
 class CardImageDetectionTests(unittest.TestCase):
@@ -17,6 +19,19 @@ class CardImageDetectionTests(unittest.TestCase):
         self.assertEqual(normalize_card_rank("1O"), "T")
         self.assertEqual(normalize_card_rank("I0"), "T")
         self.assertEqual(normalize_card_rank("1"), "T")
+
+    def test_format_raw_ocr_debug_lines_includes_empty_and_bbox_details(self) -> None:
+        empty = format_raw_ocr_debug_lines("rank", (), allowlist="0123")
+        self.assertIn("raw_count=0", empty[0])
+        self.assertIn("no raw OCR results", empty[1])
+        populated = format_raw_ocr_debug_lines(
+            "rank",
+            (OCRLine(text="6", confidence=0.151, bbox=((1, 2), (3, 4), (5, 6), (7, 8))),),
+            allowlist="0123",
+        )
+        self.assertIn("text='6'", populated[1])
+        self.assertIn("confidence=0.1510", populated[1])
+        self.assertIn("bbox=((1, 2), (3, 4), (5, 6), (7, 8))", populated[1])
 
     @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
     def test_detect_suit_from_colored_glyphs(self) -> None:
