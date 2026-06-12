@@ -68,19 +68,21 @@ Run the interactive calibration tool from the repository root:
 python tools/calibrate_regions.py
 ```
 
-By default it captures MSS monitor `1` and writes
-`config/regions_calibrated.json`. Use `--monitor-index` if Torn is on another
-monitor:
+By default it captures the leftmost physical monitor, which matches a common
+setup where the second monitor sits to the left of the main display, and writes
+`config/regions_calibrated.json`. Use `--monitor-index` if you need to force a
+specific MSS monitor:
 
 ```bash
 python tools/calibrate_regions.py --monitor-index 2 --output config/regions_calibrated.json
 ```
 
 OpenCV will show a screenshot. Draw rectangles in this order: log, hero cards,
-board cards, stack. Drag a rectangle, press Enter or Space to confirm it, and
-press Esc when you are done. The tool converts the screenshot-local rectangles
-into global screen coordinates using the monitor offset, writes the JSON file,
-and prints the same JSON to stdout.
+board cards, stack. Drag a rectangle, press Enter or Space to confirm it, press
+`C` to clear the current rectangle, and press `Q` or Esc when you are done. The
+tool converts the screenshot-local rectangles into global screen coordinates
+using the monitor offset, writes the JSON file, and prints the same JSON to
+stdout.
 
 As a first integration step, copy `log_region` from
 `config/regions_calibrated.json` into `capture.region` in
