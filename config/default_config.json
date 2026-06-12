@@ -1,11 +1,11 @@
 {
   "capture": {
-    "monitor_index": 1,
+    "monitor_index": 2,
     "region": {
-      "left": -1120,
-      "top": 181,
-      "width": 320,
-      "height": 158
+      "left": -1159,
+      "top": 131,
+      "width": 396,
+      "height": 176
     },
     "fps_limit": 12.0
   },
@@ -29,7 +29,8 @@
     "debug_card_regions_dir": "debug_captures/card_regions",
     "debug_card_regions_interval_sec": 2.0,
     "card_ocr_scale": 3.0,
-    "card_ocr_allowlist": "A23456789TJQK10cdhsCDHS"
+    "card_ocr_allowlist": "A23456789TJQK10cdhsCDHS",
+    "hero_cards_interval_sec": 0.0
   },
   "parser": {
     "max_reasonable_amount": 10000000.0,
