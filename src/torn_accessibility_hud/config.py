@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -15,6 +15,8 @@ T = TypeVar("T")
 @dataclass(frozen=True)
 class CaptureConfig:
     monitor_index: int = 1
+    # Once tools/calibrate_regions.py has produced config/regions_calibrated.json,
+    # copy its log_region here to keep the existing OCR capture pipeline intact.
     region: ScreenRegion = ScreenRegion(left=0, top=0, width=1280, height=720)
     fps_limit: float = 12.0
 
@@ -68,6 +70,69 @@ class OverlayConfig:
     text_hex: str = "#F8F8F2"
 
 
+CALIBRATED_REGION_NAMES = (
+    "log_region",
+    "hero_cards_region",
+    "board_cards_region",
+    "stack_region",
+)
+
+
+@dataclass(frozen=True)
+class RegionsConfig:
+    """Optional calibrated regions for future image-based detectors.
+
+    AppConfig deliberately does not consume this yet. The current OCR path still
+    reads CaptureConfig.region, and calibrated log_region is intended to be
+    copied there until the app is expanded to route per-detector regions.
+    """
+
+    log_region: ScreenRegion | None = None
+    hero_cards_region: ScreenRegion | None = None
+    board_cards_region: ScreenRegion | None = None
+    stack_region: ScreenRegion | None = None
+    extra_regions: tuple[tuple[str, ScreenRegion], ...] = field(default_factory=tuple)
+
+    @classmethod
+    def load(cls, path: str | Path) -> "RegionsConfig":
+        config_path = Path(path).expanduser()
+        with config_path.open("r", encoding="utf-8") as fp:
+            raw = json.load(fp)
+        if not isinstance(raw, dict):
+            raise ValueError("Calibrated regions JSON must contain an object at the top level.")
+        known = {
+            name: _screen_region_from_raw(name, raw[name])
+            for name in CALIBRATED_REGION_NAMES
+            if name in raw
+        }
+        extras = tuple(
+            (name, _screen_region_from_raw(name, value))
+            for name, value in sorted(raw.items())
+            if name not in CALIBRATED_REGION_NAMES
+        )
+        return cls(
+            log_region=known.get("log_region"),
+            hero_cards_region=known.get("hero_cards_region"),
+            board_cards_region=known.get("board_cards_region"),
+            stack_region=known.get("stack_region"),
+            extra_regions=extras,
+        )
+
+    def as_dict(self) -> dict[str, ScreenRegion]:
+        regions = {
+            name: region
+            for name, region in (
+                ("log_region", self.log_region),
+                ("hero_cards_region", self.hero_cards_region),
+                ("board_cards_region", self.board_cards_region),
+                ("stack_region", self.stack_region),
+            )
+            if region is not None
+        }
+        regions.update(dict(self.extra_regions))
+        return regions
+
+
 @dataclass(frozen=True)
 class AppConfig:
     capture: CaptureConfig = CaptureConfig()
@@ -116,6 +181,23 @@ def _coerce_dataclass(dataclass_type: type[T], raw: dict[str, Any]) -> T:
         else:
             kwargs[item.name] = value
     return dataclass_type(**kwargs)
+
+
+def _screen_region_from_raw(name: str, raw: Any) -> ScreenRegion:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{name} must be an object with left/top/width/height values.")
+    try:
+        region = ScreenRegion(
+            left=int(raw["left"]),
+            top=int(raw["top"]),
+            width=int(raw["width"]),
+            height=int(raw["height"]),
+        )
+    except KeyError as exc:
+        raise ValueError(f"{name} is missing required key {exc.args[0]!r}.") from exc
+    if region.width <= 0 or region.height <= 0:
+        raise ValueError(f"{name} must have positive width and height.")
+    return region
 
 
 def write_default_config(path: str | Path) -> Path:

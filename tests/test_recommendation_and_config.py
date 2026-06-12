@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from torn_accessibility_hud.config import AppConfig
+from torn_accessibility_hud.config import AppConfig, RegionsConfig
 from torn_accessibility_hud.models import EquityResult, GameSnapshot, RecommendationLevel
 from torn_accessibility_hud.ui.recommendation import RecommendationEngine
 
@@ -37,6 +37,36 @@ class RecommendationAndConfigTests(unittest.TestCase):
         self.assertEqual(config.capture.region.left, 10)
         self.assertTrue(config.ocr.gpu)
         self.assertEqual(config.ocr.languages, ("en",))
+
+    def test_regions_config_loads_named_regions_and_extras(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "regions_calibrated.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "log_region": {"left": 10, "top": 20, "width": 300, "height": 100},
+                        "hero_cards_region": {"left": 30, "top": 40, "width": 80, "height": 40},
+                        "region_0": {"left": 50, "top": 60, "width": 20, "height": 10},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            regions = RegionsConfig.load(path)
+        self.assertIsNotNone(regions.log_region)
+        assert regions.log_region is not None
+        self.assertEqual(regions.log_region.left, 10)
+        self.assertIsNotNone(regions.hero_cards_region)
+        self.assertIn("region_0", regions.as_dict())
+
+    def test_regions_config_rejects_non_positive_dimensions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "regions_calibrated.json"
+            path.write_text(
+                json.dumps({"log_region": {"left": 10, "top": 20, "width": 0, "height": 100}}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ValueError):
+                RegionsConfig.load(path)
 
 
 if __name__ == "__main__":

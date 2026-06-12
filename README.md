@@ -49,6 +49,45 @@ To write a fresh config template:
 torn-hud --write-default-config config/local_config.json
 ```
 
+## Region calibration
+
+Torn's poker UI exposes different information in different visual forms. The
+text log can be read by OCR, but hero cards, board cards, and stack/balance
+areas are image regions that future detectors will need to inspect separately.
+For that reason the project supports calibrating:
+
+- `log_region` - text log area; this is intended to become `capture.region`
+  for the current OCR pipeline.
+- `hero_cards_region` - your private card images.
+- `board_cards_region` - community card images.
+- `stack_region` - chip stack or balance area.
+
+Run the interactive calibration tool from the repository root:
+
+```bash
+python tools/calibrate_regions.py
+```
+
+By default it captures MSS monitor `1` and writes
+`config/regions_calibrated.json`. Use `--monitor-index` if Torn is on another
+monitor:
+
+```bash
+python tools/calibrate_regions.py --monitor-index 2 --output config/regions_calibrated.json
+```
+
+OpenCV will show a screenshot. Draw rectangles in this order: log, hero cards,
+board cards, stack. Drag a rectangle, press Enter or Space to confirm it, and
+press Esc when you are done. The tool converts the screenshot-local rectangles
+into global screen coordinates using the monitor offset, writes the JSON file,
+and prints the same JSON to stdout.
+
+As a first integration step, copy `log_region` from
+`config/regions_calibrated.json` into `capture.region` in
+`config/default_config.json`. The other regions are loaded by the optional
+`RegionsConfig` helper and are reserved for later image-based hero/board/stack
+recognition.
+
 ## Tests
 
 The deterministic tests avoid screen capture, EasyOCR, and Treys imports:
