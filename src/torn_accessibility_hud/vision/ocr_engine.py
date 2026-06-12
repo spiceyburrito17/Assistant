@@ -48,6 +48,93 @@ class EasyOCREngine:
         return tuple(sorted(lines, key=lambda line: (line.bbox[0][1] if line.bbox else 0, line.bbox[0][0] if line.bbox else 0)))
 
 
+def normalize_card_rank(raw_text: str) -> str | None:
+    cleaned = raw_text.upper().replace(" ", "").replace("|", "I")
+    cleaned = cleaned.replace("O", "0")
+    if cleaned in {"10", "I0"}:
+        return "T"
+    if cleaned == "1":
+        return "T"
+    if cleaned in {"A", "K", "Q", "J", "T"}:
+        return cleaned
+    if cleaned in {"2", "3", "4", "5", "6", "7", "8", "9"}:
+        return cleaned
+    return None
+
+
+def detect_suit_from_card_image(card_bgr: np.ndarray[Any, Any]) -> str | None:
+    """Infer suit from the dominant colored suit glyph in a card face crop."""
+
+    import cv2
+
+    if card_bgr.size == 0:
+        return None
+    sample = card_bgr[: max(1, int(card_bgr.shape[0] * 0.45)), : max(1, int(card_bgr.shape[1] * 0.45))]
+    hsv = cv2.cvtColor(sample, cv2.COLOR_BGR2HSV)
+    masks = {
+        "h": cv2.inRange(hsv, (0, 70, 50), (12, 255, 255)) | cv2.inRange(hsv, (170, 70, 50), (180, 255, 255)),
+        "d": cv2.inRange(hsv, (90, 70, 50), (130, 255, 255)),
+        "c": cv2.inRange(hsv, (35, 45, 40), (85, 255, 255)),
+    }
+    scores = {suit: int(mask.sum() // 255) for suit, mask in masks.items()}
+    gray = cv2.cvtColor(sample, cv2.COLOR_BGR2GRAY)
+    dark_score = int(cv2.inRange(gray, 0, 90).sum() // 255)
+    scores["s"] = dark_score
+    best_suit, best_score = max(scores.items(), key=lambda item: item[1])
+    return best_suit if best_score >= 8 else None
+
+
+def find_card_face_crops(region_bgr: np.ndarray[Any, Any]) -> tuple[np.ndarray[Any, Any], ...]:
+    """Find likely face-up white card rectangles in a hero/board region."""
+
+    import cv2
+
+    if region_bgr.size == 0:
+        return ()
+    hsv = cv2.cvtColor(region_bgr, cv2.COLOR_BGR2HSV)
+    white_mask = cv2.inRange(hsv, (0, 0, 130), (180, 80, 255))
+    kernel = np.ones((3, 3), dtype=np.uint8)
+    white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    contours, _hierarchy = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    crops: list[tuple[int, np.ndarray[Any, Any]]] = []
+    region_area = region_bgr.shape[0] * region_bgr.shape[1]
+    for contour in contours:
+        x, y, width, height = cv2.boundingRect(contour)
+        area = width * height
+        if area < max(180, region_area * 0.015):
+            continue
+        if height < 24 or width < 16:
+            continue
+        aspect = width / max(height, 1)
+        if not 0.35 <= aspect <= 0.95:
+            continue
+        crop = region_bgr[y : y + height, x : x + width]
+        crops.append((x, crop))
+    return tuple(crop for _x, crop in sorted(crops, key=lambda item: item[0]))
+
+
+def detect_cards_from_region(
+    region_bgr: np.ndarray[Any, Any],
+    ocr: EasyOCREngine,
+    scale: float,
+) -> tuple[str, ...]:
+    cards: list[str] = []
+    seen: set[str] = set()
+    for crop in find_card_face_crops(region_bgr):
+        rank_crop = crop[: max(1, int(crop.shape[0] * 0.42)), : max(1, int(crop.shape[1] * 0.50))]
+        processed = preprocess_card_region(rank_crop, scale=scale)
+        rank_lines = ocr.read(processed, allowlist="A23456789TJQK10")
+        rank = next((normalize_card_rank(line.text) for line in rank_lines if normalize_card_rank(line.text)), None)
+        suit = detect_suit_from_card_image(crop)
+        if rank is None or suit is None:
+            continue
+        card = f"{rank}{suit}"
+        if card not in seen:
+            cards.append(card)
+            seen.add(card)
+    return tuple(cards)
+
+
 def preprocess_card_region(
     frame: np.ndarray[Any, Any],
     scale: float = 3.0,
@@ -96,6 +183,7 @@ class CardRegionDebugger:
         self.regions = self._load_regions(config.calibrated_regions_path)
         self.last_saved_at = 0.0
         self.last_error: str | None = None
+        self.last_detected: dict[str, tuple[str, ...]] = {}
 
     @property
     def enabled(self) -> bool:
@@ -120,14 +208,19 @@ class CardRegionDebugger:
                 continue
             raw = capture.grab_region(region)
             processed = preprocess_card_region(raw, scale=self.config.card_ocr_scale)
-            lines = ocr.read(processed, allowlist=self.config.card_ocr_allowlist)
-            diagnostic_text = " ".join(line.text for line in lines).strip()
-            if diagnostic_text:
-                confidence = min((line.confidence for line in lines), default=0.0)
+            detected_cards = detect_cards_from_region(raw, ocr, scale=self.config.card_ocr_scale)
+            expected_cards = 2 if region_name == "hero_cards_region" else 3
+            max_cards = 2 if region_name == "hero_cards_region" else 5
+            diagnostic_lines_for_file = tuple(
+                OCRLine(text=card, confidence=1.0) for card in detected_cards
+            )
+            if expected_cards <= len(detected_cards) <= max_cards and detected_cards != self.last_detected.get(region_name):
+                diagnostic_text = " ".join(detected_cards)
                 diagnostic_lines.append(
-                    OCRLine(text=f"{label}: {diagnostic_text}", confidence=max(confidence, self.config.min_confidence))
+                    OCRLine(text=f"{label}: {diagnostic_text}", confidence=1.0)
                 )
-            self._save_debug_images(region_name, frame_id, raw, processed, lines)
+                self.last_detected[region_name] = detected_cards
+            self._save_debug_images(region_name, frame_id, raw, processed, diagnostic_lines_for_file)
         self.last_saved_at = time.monotonic()
         return tuple(diagnostic_lines)
 

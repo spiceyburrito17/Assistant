@@ -99,6 +99,10 @@ faces. While `ocr.debug_card_regions` is enabled, the OCR worker also saves raw
 and preprocessed hero/board crops plus OCR text under
 `debug_captures/card_regions/`. Use those images to confirm whether a failure is
 caused by shifted coordinates or by unreadable card glyphs.
+Hero/board detection looks for face-up white card rectangles, OCRs only each
+rank corner, and infers suits from glyph color. It emits hero cards only when
+two cards are detected and board cards only when three to five cards are
+detected, which avoids treating face-down card backs as real board cards.
 
 ## Tests
 

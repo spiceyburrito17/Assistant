@@ -115,7 +115,7 @@ class ActionLogParser:
         to_call_match = _TO_CALL_RE.search(text)
         if pot_match is None and to_call_match is None:
             return None
-        amount = self._safe_amount((pot_match or to_call_match).group(1))
+        amount = self._safe_pot_amount(text, (pot_match or to_call_match).group(1))
         if amount is None:
             return None
         action = ActionType.POT
@@ -123,6 +123,28 @@ class ActionLogParser:
         if to_call_match is not None and pot_match is None:
             raw_text = f"to_call {text}"
         return ParsedEvent(action=action, raw_text=raw_text, amount=amount, confidence=confidence)
+
+    def _safe_pot_amount(self, text: str, raw: str | None) -> float | None:
+        amount = self._safe_amount(raw)
+        if amount is None or raw is None:
+            return amount
+        digits = re.sub(r"\D", "", raw)
+        lowered = text.lower()
+        has_currency_marker = any(marker in text for marker in "$£€")
+        if "pot" not in lowered or has_currency_marker or len(digits) != 3:
+            return amount
+        # Torn renders pot amounts as "$55". OCR often injects the dollar sign
+        # as a middle "4" or leading "5", producing values like "545"/"555".
+        # For the small all-in/check pots shown in the HUD, prefer the corrected
+        # two-digit value instead of displaying a visually alarming 10x pot.
+        corrected: str | None = None
+        if digits[1] == "4":
+            corrected = f"{digits[0]}{digits[2]}"
+        elif digits[0] == "5" and digits[1] == digits[2]:
+            corrected = digits[1:]
+        if corrected is None:
+            return amount
+        return self._safe_amount(corrected) or amount
 
     def _parse_player_action(self, text: str, confidence: float) -> ParsedEvent | None:
         match = _PLAYER_ACTION_RE.match(text)
