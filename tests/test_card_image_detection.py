@@ -1,16 +1,20 @@
 import importlib.util
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
+from torn_accessibility_hud.config import OCRConfig
+from torn_accessibility_hud.models import OCRLine, ScreenRegion
 from torn_accessibility_hud.vision.ocr_engine import (
+    CardRegionDebugger,
     detect_suit_from_card_image,
     format_raw_ocr_debug_lines,
     is_probably_card_back,
     is_probably_folded_hero_region,
     normalize_card_rank,
 )
-from torn_accessibility_hud.models import OCRLine
 
 
 class CardImageDetectionTests(unittest.TestCase):
@@ -32,6 +36,28 @@ class CardImageDetectionTests(unittest.TestCase):
         self.assertIn("text='6'", populated[1])
         self.assertIn("confidence=0.1510", populated[1])
         self.assertIn("bbox=((1, 2), (3, 4), (5, 6), (7, 8))", populated[1])
+
+    def test_card_debug_header_is_written_before_detector_details(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            debugger = CardRegionDebugger(
+                OCRConfig(
+                    calibrated_regions_path=None,
+                    debug_card_regions_dir=temp_dir,
+                )
+            )
+            debugger.regions = {
+                "hero_cards_region": ScreenRegion(left=0, top=0, width=140, height=100),
+                "board_cards_region": ScreenRegion(left=0, top=0, width=386, height=99),
+            }
+            prefix = Path(temp_dir) / "frame_000123_hero_cards_region"
+            raw = np.zeros((100, 140, 3), dtype=np.uint8)
+            header = debugger._debug_header(123, "hero_cards_region", raw)
+            debugger._write_debug_text(prefix, (*header, "[detector] test"))
+            content = prefix.with_name(f"{prefix.name}_ocr.txt").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(content[0], "=== card detector entered for frame 000123 region=hero_cards_region ===")
+        self.assertIn("hero captured crop size: 140x100 px", content[1])
+        self.assertIn("hero region size: 140x100 px", content[2])
+        self.assertIn("board region size: 386x99 px", content[3])
 
     @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
     def test_detect_suit_from_colored_glyphs(self) -> None:
