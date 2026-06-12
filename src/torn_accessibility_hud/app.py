@@ -190,6 +190,7 @@ class TornHudApplication:
         )
 
     def run(self) -> None:
+        print("[DEBUG] Starting OCRWorker thread", flush=True)
         self.ocr_worker.start()
         self.equity_worker.start()
         self.coordinator.start()

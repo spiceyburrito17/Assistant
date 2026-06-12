@@ -5,6 +5,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -28,9 +29,19 @@ class EasyOCREngine:
     @property
     def reader(self) -> Any:
         if self._reader is None:
-            import easyocr
+            try:
+                print(
+                    f"[DEBUG] EasyOCR Reader initializing languages={self.config.languages} gpu={self.config.gpu}",
+                    flush=True,
+                )
+                import easyocr
 
-            self._reader = easyocr.Reader(list(self.config.languages), gpu=self.config.gpu)
+                self._reader = easyocr.Reader(list(self.config.languages), gpu=self.config.gpu)
+                print("[DEBUG] EasyOCR Reader initialized successfully", flush=True)
+            except Exception as exc:  # noqa: BLE001 - print daemon-thread init failures
+                print(f"[DEBUG] EasyOCR Reader initialization FAILED: {exc}", flush=True)
+                traceback.print_exc()
+                raise
         return self._reader
 
     def read(
@@ -584,6 +595,7 @@ class OCRWorker(threading.Thread):
     """Capture, debounce, and OCR frames without blocking Tkinter."""
 
     def __init__(self, app_config: AppConfig, output_queue: queue.Queue[OCRBatch]) -> None:
+        print("[DEBUG] OCRWorker._init_ called", flush=True)
         super().__init__(name="torn-ocr-worker", daemon=True)
         self.app_config = app_config
         self.output_queue = output_queue
@@ -597,53 +609,65 @@ class OCRWorker(threading.Thread):
         self.stop_event.set()
 
     def run(self) -> None:
-        capture = ScreenCapture(self.app_config.capture)
-        debouncer = StableFrameDebouncer(self.app_config.debounce)
-        ocr = EasyOCREngine(self.app_config.ocr)
-        card_debugger = CardRegionDebugger(self.app_config.ocr)
-        min_interval = 1.0 / max(self.app_config.capture.fps_limit, 1.0)
+        print("[DEBUG] OCRWorker.run() started", flush=True)
+        capture: ScreenCapture | None = None
         try:
-            with capture:
-                while not self.stop_event.is_set():
-                    started = time.monotonic()
-                    try:
-                        frame = capture.grab()
-                        self._capture_frame_id += 1
-                        card_lines = card_debugger.capture_and_read(capture, ocr, self._capture_frame_id)
-                        debounce = debouncer.update(frame)
-                        self.last_debounce_reason = debounce.reason
-                        if debounce.is_stable:
-                            lines = ocr.read(frame)
-                            self._frame_id += 1
-                            self._put_latest(
-                                OCRBatch(lines=lines + card_lines, frame_id=self._frame_id, captured_at=time.time())
-                            )
-                            if card_debugger.last_error:
-                                self.last_error = card_debugger.last_error
-                        else:
-                            print(
-                                f"[DEBUG] frame {self._capture_frame_id} dropped: "
-                                f"reason={debounce.reason} stable_count={debounce.stable_count} "
-                                f"motion_score={debounce.motion_score:.3f}",
-                                flush=True,
-                            )
-                            card_debugger.write_stability_skip(capture, self._capture_frame_id, debounce.reason)
-                            if card_lines:
+            capture = ScreenCapture(self.app_config.capture)
+            debouncer = StableFrameDebouncer(self.app_config.debounce)
+            ocr = EasyOCREngine(self.app_config.ocr)
+            card_debugger = CardRegionDebugger(self.app_config.ocr)
+            min_interval = 1.0 / max(self.app_config.capture.fps_limit, 1.0)
+            try:
+                with capture:
+                    while not self.stop_event.is_set():
+                        started = time.monotonic()
+                        try:
+                            frame = capture.grab()
+                            self._capture_frame_id += 1
+                            card_lines = card_debugger.capture_and_read(capture, ocr, self._capture_frame_id)
+                            debounce = debouncer.update(frame)
+                            self.last_debounce_reason = debounce.reason
+                            if debounce.is_stable:
+                                lines = ocr.read(frame)
+                                self._frame_id += 1
                                 self._put_latest(
-                                    OCRBatch(
-                                        lines=card_lines,
-                                        frame_id=self._capture_frame_id,
-                                        captured_at=time.time(),
-                                    )
+                                    OCRBatch(lines=lines + card_lines, frame_id=self._frame_id, captured_at=time.time())
                                 )
-                    except Exception as exc:  # noqa: BLE001 - worker must not kill the UI loop
-                        self.last_error = f"{type(exc).__name__}: {exc}"
-                        time.sleep(0.25)
-                    elapsed = time.monotonic() - started
-                    if elapsed < min_interval:
-                        self.stop_event.wait(min_interval - elapsed)
+                                if card_debugger.last_error:
+                                    self.last_error = card_debugger.last_error
+                            else:
+                                print(
+                                    f"[DEBUG] frame {self._capture_frame_id} dropped: "
+                                    f"reason={debounce.reason} stable_count={debounce.stable_count} "
+                                    f"motion_score={debounce.motion_score:.3f}",
+                                    flush=True,
+                                )
+                                card_debugger.write_stability_skip(capture, self._capture_frame_id, debounce.reason)
+                                if card_lines:
+                                    self._put_latest(
+                                        OCRBatch(
+                                            lines=card_lines,
+                                            frame_id=self._capture_frame_id,
+                                            captured_at=time.time(),
+                                        )
+                                    )
+                        except Exception as exc:  # noqa: BLE001 - worker must not kill the UI loop
+                            self.last_error = f"{type(exc).__name__}: {exc}"
+                            print(f"[DEBUG] OCRWorker loop exception: {exc}", flush=True)
+                            traceback.print_exc()
+                            time.sleep(0.25)
+                        elapsed = time.monotonic() - started
+                        if elapsed < min_interval:
+                            self.stop_event.wait(min_interval - elapsed)
+            finally:
+                capture.close()
+        except Exception as exc:  # noqa: BLE001 - daemon thread must expose startup crashes
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            print(f"[DEBUG] OCRWorker.run() CRASHED: {exc}", flush=True)
+            traceback.print_exc()
         finally:
-            capture.close()
+            if capture is not None:
+                capture.close()
 
     def _put_latest(self, batch: OCRBatch) -> None:
         while True:
