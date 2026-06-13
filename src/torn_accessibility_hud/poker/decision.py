@@ -6,7 +6,7 @@ adjustments later via ``DecisionInputs.range_edge_adjustment``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..models import (
     DecisionConfidence,
@@ -16,20 +16,11 @@ from ..models import (
     Recommendation,
     RecommendationLevel,
     RecommendedAction,
+    SolverStatus,
     Street,
+    TableStateConfidence,
 )
-
-
-@dataclass(frozen=True)
-class DecisionInputs:
-    """Normalized inputs for a single decision pass."""
-
-    snapshot: GameSnapshot
-    hero_equity: float | None
-    equity_warning: str | None = None
-    simulations: int = 0
-    # Future hook: shift required edge before choosing raise lines.
-    range_edge_adjustment: float = 0.0
+from .decision_gate import decision_blocked_reason, gate_recommended_action
 
 
 @dataclass(frozen=True)
@@ -40,6 +31,17 @@ class DecisionThresholds:
     flop_aggression_equity: float = 0.55
     turn_aggression_equity: float = 0.58
     river_aggression_equity: float = 0.62
+
+
+@dataclass(frozen=True)
+class DecisionInputs:
+    """Normalized inputs for a single decision pass."""
+
+    snapshot: GameSnapshot
+    hero_equity: float | None
+    equity_warning: str | None = None
+    simulations: int = 0
+    range_edge_adjustment: float = 0.0
 
 
 class DecisionEngine:
@@ -56,18 +58,49 @@ class DecisionEngine:
     def __init__(self, thresholds: DecisionThresholds | None = None) -> None:
         self.thresholds = thresholds or DecisionThresholds()
 
-    def build(self, snapshot: GameSnapshot, equity_result: EquityResult | None) -> Recommendation:
+    def build(
+        self,
+        snapshot: GameSnapshot,
+        equity_result: EquityResult | None,
+        *,
+        solver_status: SolverStatus = SolverStatus.SKIPPED,
+    ) -> Recommendation:
         inputs = self._normalize_inputs(snapshot, equity_result)
         confidence, confidence_notes = self._assess_confidence(inputs)
-        required_equity = self._required_equity(inputs.snapshot)
+        required_equity = self._required_equity(snapshot)
         hero_equity = inputs.hero_equity
         edge = (
             (hero_equity - required_equity + inputs.range_edge_adjustment)
             if hero_equity is not None and required_equity is not None
             else None
         )
-        action = self._choose_action(inputs, edge, confidence)
-        raise_sizing = self._raise_sizing(inputs.snapshot) if action is RecommendedAction.RAISE else None
+
+        blocked_reason = decision_blocked_reason(snapshot, equity_result, solver_status)
+        if blocked_reason is not None:
+            return self._blocked_recommendation(
+                snapshot=snapshot,
+                solver_status=solver_status,
+                blocked_reason=blocked_reason,
+                hero_equity=hero_equity,
+                required_equity=required_equity,
+                edge=edge,
+                confidence_notes=confidence_notes,
+            )
+
+        raw_action = self._choose_action(inputs, edge, confidence)
+        action, gate_reason = gate_recommended_action(raw_action, snapshot)
+        if gate_reason is not None:
+            return self._blocked_recommendation(
+                snapshot=snapshot,
+                solver_status=solver_status,
+                blocked_reason=gate_reason,
+                hero_equity=hero_equity,
+                required_equity=required_equity,
+                edge=edge,
+                confidence_notes=confidence_notes,
+            )
+
+        raise_sizing = self._raise_sizing(snapshot) if action is RecommendedAction.RAISE else None
         level = self._level_for_action(action, edge, confidence)
         title = self._title_for_action(action)
         detail = self._detail_for_action(
@@ -92,6 +125,37 @@ class DecisionEngine:
             required_equity=required_equity,
             edge=edge,
             raise_sizing=raise_sizing,
+            state_confidence=snapshot.state_confidence,
+            legal_actions=snapshot.legal_actions,
+            solver_status=solver_status,
+        )
+
+    def _blocked_recommendation(
+        self,
+        snapshot: GameSnapshot,
+        solver_status: SolverStatus,
+        blocked_reason: str,
+        hero_equity: float | None,
+        required_equity: float | None,
+        edge: float | None,
+        confidence_notes: tuple[str, ...],
+    ) -> Recommendation:
+        notes = tuple(dict.fromkeys((*confidence_notes, blocked_reason)))
+        return Recommendation(
+            level=RecommendationLevel.WAIT,
+            title="WAIT",
+            detail=f"Decision blocked: {blocked_reason}.",
+            color_hex=self.COLORS[RecommendationLevel.WAIT],
+            action=RecommendedAction.WAIT,
+            confidence=DecisionConfidence.LOW,
+            confidence_notes=notes,
+            equity=hero_equity,
+            required_equity=required_equity,
+            edge=edge,
+            state_confidence=snapshot.state_confidence,
+            legal_actions=snapshot.legal_actions,
+            solver_status=solver_status,
+            decision_blocked_reason=blocked_reason,
         )
 
     def _normalize_inputs(
@@ -119,7 +183,10 @@ class DecisionEngine:
     def _required_equity(self, snapshot: GameSnapshot) -> float | None:
         if snapshot.to_call <= 0:
             return 0.0
-        denominator = snapshot.pot_size + snapshot.to_call
+        pot = snapshot.trusted_pot_size
+        if pot is None:
+            return None
+        denominator = pot + snapshot.to_call
         if denominator <= 0:
             return None
         return max(0.0, min(1.0, snapshot.to_call / denominator))
@@ -134,10 +201,12 @@ class DecisionEngine:
             notes.append("hero cards missing")
         if snapshot.street is not Street.PREFLOP and len(snapshot.board_cards) < 3:
             notes.append("board cards missing for street")
-        if snapshot.pot_size <= 0:
+        if snapshot.trusted_pot_size is None:
             notes.append("pot unreadable")
         if snapshot.to_call < 0:
             notes.append("call amount invalid")
+        if not snapshot.legal_actions:
+            notes.append("legal actions missing")
         if inputs.hero_equity is None:
             notes.append("equity unavailable")
         elif inputs.simulations <= 0:
@@ -158,9 +227,7 @@ class DecisionEngine:
         if edge is None or inputs.hero_equity is None:
             return RecommendedAction.WAIT
         if confidence is DecisionConfidence.LOW:
-            if snapshot.to_call <= 0:
-                return RecommendedAction.CHECK
-            return RecommendedAction.CALL
+            return RecommendedAction.WAIT
 
         thresholds = self.thresholds
         if edge < thresholds.fold_edge:
@@ -188,7 +255,7 @@ class DecisionEngine:
         return hero_equity >= minimum_equity
 
     def _raise_sizing(self, snapshot: GameSnapshot) -> RaiseSizing:
-        pot = max(snapshot.pot_size, 0.0)
+        pot = max(snapshot.trusted_pot_size or 0.0, 0.0)
         to_call = max(snapshot.to_call, 0.0)
         pot_after_call = pot + to_call
         if to_call > 0:

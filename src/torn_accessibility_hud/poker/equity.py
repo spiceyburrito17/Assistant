@@ -40,7 +40,7 @@ class MonteCarloEquityCalculator:
             return EquityResult(0.0, 0.0, 0, snapshot.generation, 0.0, "invalid or duplicate cards")
         opponents = tuple(snapshot.active_opponents)
         if not opponents:
-            return EquityResult(1.0, 0.0, 0, snapshot.generation, 0.0, "no active opponents")
+            return EquityResult(None, 0.0, 0, snapshot.generation, 0.0, "insufficient state")
 
         try:
             from treys import Card, Evaluator

@@ -137,6 +137,7 @@ class TkOverlay:
 
         hero = " ".join(snapshot.hero_cards) if snapshot.hero_cards else "--"
         board = " ".join(snapshot.board_cards) if snapshot.board_cards else "--"
+        pot_display = f"{snapshot.pot_size:,.0f}" if snapshot.pot_size > 0 else "--"
         equity = self._format_percent(recommendation.equity)
         required = self._format_percent(recommendation.required_equity)
         edge = self._format_edge(recommendation.edge)
@@ -145,7 +146,7 @@ class TkOverlay:
         summary_lines = [
             f"Hero:       {hero}",
             f"Board:      {board}",
-            f"Pot:        {snapshot.pot_size:,.0f}",
+            f"Pot:        {pot_display}",
             f"To call:    {snapshot.to_call:,.0f}",
             f"Equity:     {equity}",
             f"Required:   {required}",
@@ -165,6 +166,14 @@ class TkOverlay:
             )
         if recommendation.confidence is DecisionConfidence.LOW and recommendation.confidence_notes:
             summary_lines.append(f"Notes:      {', '.join(recommendation.confidence_notes)}")
+        debug_lines = [
+            f"state_confidence={recommendation.state_confidence.value}",
+            f"legal_actions=[{', '.join(action.value for action in recommendation.legal_actions) or '--'}]",
+            f"solver_status={recommendation.solver_status.value}",
+        ]
+        if recommendation.decision_blocked_reason:
+            debug_lines.append(f"decision_blocked_reason={recommendation.decision_blocked_reason}")
+        summary_lines.extend(debug_lines)
         self.summary_var.set("\n".join(summary_lines))
 
         if snapshot.opponent_stats:

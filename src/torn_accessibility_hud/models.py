@@ -52,6 +52,18 @@ class DecisionConfidence(str, Enum):
     LOW = "low"
 
 
+class TableStateConfidence(str, Enum):
+    HIGH = "high"
+    LOW = "low"
+
+
+class SolverStatus(str, Enum):
+    OK = "ok"
+    TIMEOUT = "timeout"
+    SKIPPED = "skipped"
+    INSUFFICIENT_STATE = "insufficient_state"
+
+
 @dataclass(frozen=True)
 class ScreenRegion:
     """A rectangular screen region in physical pixels."""
@@ -127,11 +139,21 @@ class GameSnapshot:
     street: Street = Street.PREFLOP
     active_opponents: tuple[str, ...] = ()
     opponent_stats: tuple[PlayerStats, ...] = ()
+    legal_actions: tuple[RecommendedAction, ...] = ()
+    state_confidence: TableStateConfidence = TableStateConfidence.LOW
     generation: int = 0
 
     @property
     def has_minimum_equity_inputs(self) -> bool:
         return len(self.hero_cards) == 2 and len(self.board_cards) <= 5
+
+    @property
+    def trusted_pot_size(self) -> float | None:
+        return self.pot_size if self.pot_size > 0 else None
+
+    @property
+    def trusted_to_call(self) -> float | None:
+        return self.to_call
 
 
 @dataclass(frozen=True)
@@ -171,6 +193,10 @@ class Recommendation:
     required_equity: float | None = None
     edge: float | None = None
     raise_sizing: RaiseSizing | None = None
+    state_confidence: TableStateConfidence = TableStateConfidence.LOW
+    legal_actions: tuple[RecommendedAction, ...] = ()
+    solver_status: SolverStatus = SolverStatus.SKIPPED
+    decision_blocked_reason: str | None = None
 
     @property
     def pot_odds(self) -> float | None:

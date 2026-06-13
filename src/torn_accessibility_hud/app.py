@@ -20,7 +20,7 @@ from .config import AppConfig, write_default_config
 from .models import ActionType, EquityRequest, EquityResult, GameSnapshot, OCRBatch, OverlayState, ParsedEvent, Street
 from .parsing.log_parser import ActionLogParser
 from .poker.equity import EquityWorker
-from .state import StickyCardCache
+from .state import TrustedTableStateManager
 from .tracking.ledger import OpponentLedger
 debug_log("app module importing TkOverlay")
 from .ui.overlay import TkOverlay
@@ -111,8 +111,9 @@ class CoordinatorWorker(threading.Thread):
         self.parser = ActionLogParser(config.parser)
         self.ledger = OpponentLedger()
         self.builder = SnapshotBuilder(self.ledger)
-        self.card_cache = StickyCardCache(
-            max_missing_scans=config.ocr.card_cache_max_missing_scans,
+        self.trusted_state = TrustedTableStateManager(
+            hero_missing_grace_scans=config.ocr.card_cache_max_missing_scans,
+            board_regress_scans=max(config.ocr.card_cache_max_missing_scans // 2, 8),
         )
         self._last_published: OverlayState | None = None
         self.recommendations = RecommendationEngine()
@@ -146,14 +147,15 @@ class CoordinatorWorker(threading.Thread):
         if events:
             self.ledger.process_events(events)
             self.builder.apply_events(events)
-        snapshot, cache_changed = self.card_cache.apply(
+        trusted, snapshot = self.trusted_state.apply(
             self.builder.snapshot,
             events,
+            self.latest_lines,
             hero_region_folded=latest.hero_region_folded,
             hero_cards_scanned=latest.hero_cards_scanned,
             board_cards_scanned=latest.board_cards_scanned,
         )
-        if cache_changed:
+        if snapshot != self.builder.snapshot:
             self.builder.snapshot = snapshot
 
     def _drain_equity(self) -> None:
@@ -183,8 +185,15 @@ class CoordinatorWorker(threading.Thread):
 
     def _publish(self) -> None:
         snapshot = self.builder.snapshot
+        trusted = self.trusted_state.trusted
         recommendation = self.recommendations.build(snapshot, self.latest_equity)
-        diagnostics = {}
+        diagnostics = {
+            "state_confidence": trusted.state_confidence.value,
+            "legal_actions": ",".join(action.value for action in trusted.legal_actions) or "--",
+            "solver_status": recommendation.solver_status.value,
+        }
+        if recommendation.decision_blocked_reason:
+            diagnostics["decision_blocked_reason"] = recommendation.decision_blocked_reason
         if self.equity_worker.last_error:
             diagnostics["equity_error"] = self.equity_worker.last_error
         state = OverlayState(

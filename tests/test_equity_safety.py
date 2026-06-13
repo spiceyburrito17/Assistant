@@ -38,8 +38,8 @@ class EquitySafetyTests(unittest.TestCase):
             timeout_ms=10,
         )
         recommendation = RecommendationEngine().build(snapshot, result)
-        self.assertEqual(recommendation.level, RecommendationLevel.CAUTION)
-        self.assertEqual(recommendation.title, "DEALING")
+        self.assertEqual(recommendation.level, RecommendationLevel.UNKNOWN)
+        self.assertEqual(recommendation.title, "UNKNOWN")
 
 
 if __name__ == "__main__":
