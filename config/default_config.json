@@ -28,11 +28,18 @@
     "debug_card_regions": false,
     "debug_card_regions_dir": "debug_captures/card_regions",
     "debug_card_regions_interval_sec": 2.0,
+    "debug_table_regions": false,
+    "debug_table_regions_dir": "debug_captures/table_regions",
+    "debug_table_regions_interval_sec": 1.0,
     "card_ocr_scale": 3.0,
     "card_ocr_allowlist": "A23456789TJQK10cdhsCDHS",
     "hero_cards_interval_sec": 0.25,
     "card_stable_reads_required": 3,
-    "card_cache_max_missing_scans": 12
+    "card_cache_max_missing_scans": 12,
+    "pot_ocr_scale": 4.0,
+    "pot_ocr_allowlist": "$0123456789,.",
+    "action_ocr_scale": 3.0,
+    "action_ocr_allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "
   },
   "parser": {
     "max_reasonable_amount": 10000000.0,

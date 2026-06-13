@@ -55,4 +55,5 @@ class RecommendationEngine:
             state_confidence=snapshot.state_confidence,
             legal_actions=snapshot.legal_actions,
             solver_status=SolverStatus.SKIPPED,
+            parse_diagnostics=snapshot.parse_diagnostics,
         )

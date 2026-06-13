@@ -154,6 +154,7 @@ class CoordinatorWorker(threading.Thread):
             hero_region_folded=latest.hero_region_folded,
             hero_cards_scanned=latest.hero_cards_scanned,
             board_cards_scanned=latest.board_cards_scanned,
+            table_ocr=latest.table_ocr,
         )
         if snapshot != self.builder.snapshot:
             self.builder.snapshot = snapshot
@@ -187,13 +188,26 @@ class CoordinatorWorker(threading.Thread):
         snapshot = self.builder.snapshot
         trusted = self.trusted_state.trusted
         recommendation = self.recommendations.build(snapshot, self.latest_equity)
+        parse_diag = snapshot.parse_diagnostics or trusted.parse_diagnostics
         diagnostics = {
             "state_confidence": trusted.state_confidence.value,
             "legal_actions": ",".join(action.value for action in trusted.legal_actions) or "--",
             "solver_status": recommendation.solver_status.value,
         }
-        if recommendation.decision_blocked_reason:
-            diagnostics["decision_blocked_reason"] = recommendation.decision_blocked_reason
+        if parse_diag is not None:
+            diagnostics["pot_raw"] = parse_diag.pot_raw or "--"
+            diagnostics["pot_parsed"] = (
+                f"{parse_diag.pot_parsed:,.0f}" if parse_diag.pot_parsed is not None else "--"
+            )
+            diagnostics["legal_actions_raw"] = "|".join(parse_diag.legal_actions_raw) or "--"
+            diagnostics["legal_actions_normalized"] = ",".join(parse_diag.legal_actions_normalized) or "--"
+            if parse_diag.block_reason:
+                diagnostics["block_reason"] = parse_diag.block_reason
+        block_reason = recommendation.decision_blocked_reason or (
+            parse_diag.block_reason if parse_diag is not None else None
+        )
+        if block_reason:
+            diagnostics["decision_blocked_reason"] = block_reason
         if self.equity_worker.last_error:
             diagnostics["equity_error"] = self.equity_worker.last_error
         state = OverlayState(

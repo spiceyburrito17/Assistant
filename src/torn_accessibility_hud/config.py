@@ -42,14 +42,22 @@ class OCRConfig:
     calibrated_regions_path: str | None = "config/regions_calibrated.json"
     hero_cards_region: ScreenRegion | None = None
     board_cards_region: ScreenRegion | None = None
+    pot_region: ScreenRegion | None = None
     debug_card_regions: bool = False
     debug_card_regions_dir: str = "debug_captures/card_regions"
     debug_card_regions_interval_sec: float = 2.0
+    debug_table_regions: bool = False
+    debug_table_regions_dir: str = "debug_captures/table_regions"
+    debug_table_regions_interval_sec: float = 1.0
     hero_cards_interval_sec: float = 0.25
     card_stable_reads_required: int = 3
     card_cache_max_missing_scans: int = 12
     card_ocr_scale: float = 3.0
     card_ocr_allowlist: str = "0123456789AaKkQqJjTtCDHScdhs"
+    pot_ocr_scale: float = 4.0
+    pot_ocr_allowlist: str = "$0123456789,."
+    action_ocr_scale: float = 3.0
+    action_ocr_allowlist: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "
 
 
 @dataclass(frozen=True)
@@ -86,6 +94,12 @@ CALIBRATED_REGION_NAMES = (
     "hero_cards_region",
     "board_cards_region",
     "stack_region",
+    "pot_region",
+    "fold_button_region",
+    "check_button_region",
+    "call_button_region",
+    "raise_button_region",
+    "bet_button_region",
 )
 
 
@@ -102,6 +116,12 @@ class RegionsConfig:
     hero_cards_region: ScreenRegion | None = None
     board_cards_region: ScreenRegion | None = None
     stack_region: ScreenRegion | None = None
+    pot_region: ScreenRegion | None = None
+    fold_button_region: ScreenRegion | None = None
+    check_button_region: ScreenRegion | None = None
+    call_button_region: ScreenRegion | None = None
+    raise_button_region: ScreenRegion | None = None
+    bet_button_region: ScreenRegion | None = None
     extra_regions: tuple[tuple[str, ScreenRegion], ...] = field(default_factory=tuple)
 
     @classmethod
@@ -126,6 +146,12 @@ class RegionsConfig:
             hero_cards_region=known.get("hero_cards_region"),
             board_cards_region=known.get("board_cards_region"),
             stack_region=known.get("stack_region"),
+            pot_region=known.get("pot_region"),
+            fold_button_region=known.get("fold_button_region"),
+            check_button_region=known.get("check_button_region"),
+            call_button_region=known.get("call_button_region"),
+            raise_button_region=known.get("raise_button_region"),
+            bet_button_region=known.get("bet_button_region"),
             extra_regions=extras,
         )
 
@@ -137,6 +163,12 @@ class RegionsConfig:
                 ("hero_cards_region", self.hero_cards_region),
                 ("board_cards_region", self.board_cards_region),
                 ("stack_region", self.stack_region),
+                ("pot_region", self.pot_region),
+                ("fold_button_region", self.fold_button_region),
+                ("check_button_region", self.check_button_region),
+                ("call_button_region", self.call_button_region),
+                ("raise_button_region", self.raise_button_region),
+                ("bet_button_region", self.bet_button_region),
             )
             if region is not None
         }
@@ -242,14 +274,22 @@ def write_default_config(path: str | Path) -> Path:
             "calibrated_regions_path": "config/regions_calibrated.json",
             "hero_cards_region": None,
             "board_cards_region": None,
+            "pot_region": None,
             "debug_card_regions": False,
             "debug_card_regions_dir": "debug_captures/card_regions",
             "debug_card_regions_interval_sec": 2.0,
+            "debug_table_regions": False,
+            "debug_table_regions_dir": "debug_captures/table_regions",
+            "debug_table_regions_interval_sec": 1.0,
             "hero_cards_interval_sec": 0.25,
             "card_stable_reads_required": 3,
             "card_cache_max_missing_scans": 12,
             "card_ocr_scale": 3.0,
             "card_ocr_allowlist": "0123456789AaKkQqJjTtCDHScdhs",
+            "pot_ocr_scale": 4.0,
+            "pot_ocr_allowlist": "$0123456789,.",
+            "action_ocr_scale": 3.0,
+            "action_ocr_allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",
         },
         "parser": {
             "max_reasonable_amount": 10000000.0,

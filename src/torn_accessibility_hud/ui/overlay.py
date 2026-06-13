@@ -166,6 +166,22 @@ class TkOverlay:
             )
         if recommendation.confidence is DecisionConfidence.LOW and recommendation.confidence_notes:
             summary_lines.append(f"Notes:      {', '.join(recommendation.confidence_notes)}")
+        parse_diag = recommendation.parse_diagnostics or state.snapshot.parse_diagnostics
+        if parse_diag is not None:
+            summary_lines.append(f"pot_raw={parse_diag.pot_raw or '--'}")
+            parsed_pot = (
+                f"{parse_diag.pot_parsed:,.0f}" if parse_diag.pot_parsed is not None else "--"
+            )
+            summary_lines.append(f"pot_parsed={parsed_pot}")
+            summary_lines.append(
+                f"legal_actions_raw=[{', '.join(parse_diag.legal_actions_raw) or '--'}]"
+            )
+            summary_lines.append(
+                "legal_actions_normalized=["
+                f"{', '.join(parse_diag.legal_actions_normalized) or '--'}]"
+            )
+            if parse_diag.block_reason:
+                summary_lines.append(f"block_reason={parse_diag.block_reason}")
         debug_lines = [
             f"state_confidence={recommendation.state_confidence.value}",
             f"legal_actions=[{', '.join(action.value for action in recommendation.legal_actions) or '--'}]",

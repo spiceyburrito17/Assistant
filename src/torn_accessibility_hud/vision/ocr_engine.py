@@ -984,6 +984,9 @@ class OCRWorker(threading.Thread):
             debouncer = StableFrameDebouncer(self.app_config.debounce)
             ocr = EasyOCREngine(self.app_config.ocr)
             card_debugger = CardRegionDebugger(self.app_config.ocr)
+            from .table_regions import TableRegionReader
+
+            table_reader = TableRegionReader(self.app_config.ocr)
             min_interval = 1.0 / max(self.app_config.capture.fps_limit, 1.0)
             try:
                 with capture:
@@ -993,6 +996,7 @@ class OCRWorker(threading.Thread):
                             frame = capture.grab()
                             self._capture_frame_id += 1
                             card_lines = card_debugger.capture_and_read(capture, ocr, self._capture_frame_id)
+                            table_ocr = table_reader.capture_and_read(capture, ocr, self._capture_frame_id)
                             debounce = debouncer.update(frame)
                             self.last_debounce_reason = debounce.reason
                             if debounce.is_stable:
@@ -1006,10 +1010,13 @@ class OCRWorker(threading.Thread):
                                         hero_region_folded=card_debugger.hero_region_folded,
                                         hero_cards_scanned=card_debugger.hero_cards_scanned,
                                         board_cards_scanned=card_debugger.board_cards_scanned,
+                                        table_ocr=table_ocr,
                                     )
                                 )
                                 if card_debugger.last_error:
                                     self.last_error = card_debugger.last_error
+                                elif table_reader.last_error:
+                                    self.last_error = table_reader.last_error
                             else:
                                 debug_log(
                                     "frame %s dropped: reason=%s stable_count=%s motion_score=%.3f",
@@ -1018,7 +1025,7 @@ class OCRWorker(threading.Thread):
                                     debounce.stable_count,
                                     debounce.motion_score,
                                 )
-                                if card_lines:
+                                if card_lines or table_ocr.pot is not None or table_ocr.buttons:
                                     self._put_latest(
                                         OCRBatch(
                                             lines=card_lines,
@@ -1027,6 +1034,7 @@ class OCRWorker(threading.Thread):
                                             hero_region_folded=card_debugger.hero_region_folded,
                                             hero_cards_scanned=card_debugger.hero_cards_scanned,
                                             board_cards_scanned=card_debugger.board_cards_scanned,
+                                            table_ocr=table_ocr,
                                         )
                                     )
                         except Exception as exc:  # noqa: BLE001 - worker must not kill the UI loop

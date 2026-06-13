@@ -92,6 +92,43 @@ class OCRLine:
 
 
 @dataclass(frozen=True)
+class PotOCRResult:
+    raw_text: str
+    parsed_amount: float | None
+    ocr_confidence: float
+    allowlist: str
+
+
+@dataclass(frozen=True)
+class ButtonOCRResult:
+    region_name: str
+    raw_text: str
+    normalized_label: str | None
+    confidence: float
+    ambiguous: bool
+    expected_label: str | None = None
+    detected_labels: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class TableOCRResult:
+    pot: PotOCRResult | None = None
+    buttons: tuple[ButtonOCRResult, ...] = ()
+    pot_region_scanned: bool = False
+    action_regions_scanned: bool = False
+
+
+@dataclass(frozen=True)
+class TableParseDiagnostics:
+    pot_raw: str | None = None
+    pot_parsed: float | None = None
+    legal_actions_raw: tuple[str, ...] = ()
+    legal_actions_normalized: tuple[str, ...] = ()
+    actions_ambiguous: bool = False
+    block_reason: str | None = None
+
+
+@dataclass(frozen=True)
 class OCRBatch:
     """Stable OCR output for a captured frame."""
 
@@ -101,6 +138,7 @@ class OCRBatch:
     hero_region_folded: bool = False
     hero_cards_scanned: bool = False
     board_cards_scanned: bool = False
+    table_ocr: TableOCRResult | None = None
 
 
 @dataclass(frozen=True)
@@ -141,6 +179,8 @@ class GameSnapshot:
     opponent_stats: tuple[PlayerStats, ...] = ()
     legal_actions: tuple[RecommendedAction, ...] = ()
     state_confidence: TableStateConfidence = TableStateConfidence.LOW
+    actions_ambiguous: bool = False
+    parse_diagnostics: TableParseDiagnostics | None = None
     generation: int = 0
 
     @property
@@ -197,6 +237,7 @@ class Recommendation:
     legal_actions: tuple[RecommendedAction, ...] = ()
     solver_status: SolverStatus = SolverStatus.SKIPPED
     decision_blocked_reason: str | None = None
+    parse_diagnostics: TableParseDiagnostics | None = None
 
     @property
     def pot_odds(self) -> float | None:

@@ -44,6 +44,11 @@ class CalibrateRegionsTests(unittest.TestCase):
                 (9, 10, 90, 100),
                 (11, 12, 110, 120),
                 (13, 14, 130, 140),
+                (15, 16, 50, 20),
+                (17, 18, 50, 20),
+                (19, 20, 50, 20),
+                (21, 22, 50, 20),
+                (23, 24, 60, 24),
             ),
             monitor_left=1000,
             monitor_top=200,
@@ -52,7 +57,9 @@ class CalibrateRegionsTests(unittest.TestCase):
         self.assertEqual(regions["hero_cards_region"]["left"], 1005)
         self.assertEqual(regions["board_cards_region"]["top"], 210)
         self.assertEqual(regions["stack_region"]["width"], 110)
-        self.assertEqual(regions["region_0"], {"left": 1013, "top": 214, "width": 130, "height": 140})
+        self.assertEqual(regions["pot_region"], {"left": 1013, "top": 214, "width": 130, "height": 140})
+        self.assertEqual(regions["raise_button_region"], {"left": 1021, "top": 222, "width": 50, "height": 20})
+        self.assertEqual(regions["region_0"], {"left": 1023, "top": 224, "width": 60, "height": 24})
 
     def test_label_regions_skips_empty_rectangles(self) -> None:
         module = _load_calibration_module()

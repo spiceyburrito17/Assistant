@@ -17,6 +17,11 @@ REGION_NAMES = (
     "hero_cards_region",
     "board_cards_region",
     "stack_region",
+    "pot_region",
+    "fold_button_region",
+    "check_button_region",
+    "call_button_region",
+    "raise_button_region",
 )
 DEFAULT_OUTPUT_PATH = Path("config/regions_calibrated.json")
 

@@ -7,7 +7,7 @@ from ..models import (
     GameSnapshot,
     RecommendedAction,
     SolverStatus,
-    TableStateConfidence,
+    Street,
 )
 
 
@@ -16,20 +16,24 @@ def decision_blocked_reason(
     equity_result: EquityResult | None,
     solver_status: SolverStatus,
 ) -> str | None:
+    if len(snapshot.hero_cards) != 2:
+        return "hero cards missing"
+    if snapshot.street is not Street.PREFLOP and len(snapshot.board_cards) < 3:
+        return "board cards missing for street"
     if snapshot.trusted_pot_size is None:
         return "pot unreadable"
-    if snapshot.to_call < 0:
-        return "call amount invalid"
+    if snapshot.actions_ambiguous:
+        return "actions ambiguous"
     if not snapshot.legal_actions:
         return "legal actions missing"
+    if snapshot.to_call < 0:
+        return "call amount invalid"
     if solver_status is SolverStatus.TIMEOUT:
         return "simulation budget hit timeout"
     if solver_status is SolverStatus.INSUFFICIENT_STATE:
         return "insufficient state"
     if equity_result is None or equity_result.hero_equity is None:
         return "equity unavailable"
-    if snapshot.state_confidence is TableStateConfidence.LOW:
-        return "table state low confidence"
     return None
 
 

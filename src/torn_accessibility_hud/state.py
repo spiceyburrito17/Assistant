@@ -8,13 +8,21 @@ from dataclasses import dataclass, replace
 from .diagnostics import debug_log
 from .models import (
     ActionType,
+    ButtonOCRResult,
     GameSnapshot,
     ParsedEvent,
     RecommendedAction,
     Street,
+    TableOCRResult,
+    TableParseDiagnostics,
     TableStateConfidence,
 )
-from .parsing.legal_actions import parse_legal_actions_from_lines
+from .parsing.amounts import parse_to_call_from_button_text
+from .parsing.legal_actions import (
+    allowed_labels_for_region,
+    collect_legal_actions_from_lines,
+    legal_action_to_recommended,
+)
 
 
 class CardReadStabilizer:
@@ -172,6 +180,8 @@ class TrustedTableState:
     generation: int = 0
     updated_at: float = 0.0
     state_confidence: TableStateConfidence = TableStateConfidence.LOW
+    actions_ambiguous: bool = False
+    parse_diagnostics: TableParseDiagnostics | None = None
 
     def to_snapshot(self, raw: GameSnapshot) -> GameSnapshot:
         return replace(
@@ -183,6 +193,8 @@ class TrustedTableState:
             street=self.street,
             legal_actions=self.legal_actions,
             state_confidence=self.state_confidence,
+            actions_ambiguous=self.actions_ambiguous,
+            parse_diagnostics=self.parse_diagnostics,
             generation=self.generation,
         )
 
@@ -214,6 +226,7 @@ class TrustedTableStateManager:
         hero_cards_scanned: bool = False,
         board_cards_scanned: bool = False,
         hero_region_folded: bool = False,
+        table_ocr: TableOCRResult | None = None,
     ) -> tuple[TrustedTableState, GameSnapshot]:
         now = time.monotonic()
         hero_cards = self._trusted.hero_cards
@@ -272,25 +285,52 @@ class TrustedTableStateManager:
             street = self._street_from_board(board_cards)
             self._board_missing_scans = 0
 
+        pot_raw: str | None = self._trusted.parse_diagnostics.pot_raw if self._trusted.parse_diagnostics else None
+        pot_parsed: float | None = pot_size
+
         for event in events:
             if event.action is not ActionType.POT or event.amount is None:
                 continue
             if event.raw_text.lower().startswith("to_call"):
                 to_call = max(0.0, event.amount)
-            elif event.amount > 0:
+            elif event.amount > 0 and pot_size is None:
                 pot_size = event.amount
 
-        parsed_actions = parse_legal_actions_from_lines(ocr_lines)
-        if parsed_actions:
-            legal_actions = parsed_actions
+        if table_ocr is not None and table_ocr.pot is not None:
+            pot_raw = table_ocr.pot.raw_text or pot_raw
+            if table_ocr.pot.parsed_amount is not None and table_ocr.pot.parsed_amount > 0:
+                pot_size = table_ocr.pot.parsed_amount
+                pot_parsed = table_ocr.pot.parsed_amount
+            elif table_ocr.pot_region_scanned and not table_ocr.pot.raw_text:
+                debug_log("[TRUST] pot region scanned but empty OCR")
+
+        legal_actions, legal_actions_raw, legal_actions_normalized, actions_ambiguous = (
+            self._resolve_legal_actions(table_ocr, ocr_lines)
+        )
+        if legal_actions:
             self._legal_actions_seen_at = now
         elif self._legal_actions_seen_at > 0.0 and now - self._legal_actions_seen_at <= self.legal_actions_grace_sec:
             legal_actions = self._trusted.legal_actions
+            if self._trusted.parse_diagnostics is not None:
+                legal_actions_raw = self._trusted.parse_diagnostics.legal_actions_raw
+                legal_actions_normalized = self._trusted.parse_diagnostics.legal_actions_normalized
+            actions_ambiguous = self._trusted.actions_ambiguous
         else:
             legal_actions = ()
+            legal_actions_raw = ()
+            legal_actions_normalized = ()
 
-        if raw.pot_size > 0:
+        if table_ocr is not None:
+            for button in table_ocr.buttons:
+                if button.region_name != "call_button_region" or not button.raw_text:
+                    continue
+                call_amount = parse_to_call_from_button_text(button.raw_text)
+                if call_amount is not None and call_amount > 0:
+                    to_call = call_amount
+
+        if raw.pot_size > 0 and pot_size is None:
             pot_size = raw.pot_size
+            pot_parsed = raw.pot_size
         if raw.to_call > 0:
             to_call = raw.to_call
         elif any(
@@ -308,13 +348,31 @@ class TrustedTableStateManager:
         elif hero_cards and not board_cards:
             street = Street.PREFLOP
 
-        confidence, _notes = self._assess_confidence(
+        confidence, notes = self._assess_confidence(
             hero_cards=hero_cards,
             board_cards=board_cards,
             pot_size=pot_size,
             to_call=to_call,
             street=street,
             legal_actions=legal_actions,
+            actions_ambiguous=actions_ambiguous,
+        )
+        block_reason = self._derive_block_reason(
+            hero_cards=hero_cards,
+            board_cards=board_cards,
+            street=street,
+            pot_size=pot_size,
+            legal_actions=legal_actions,
+            actions_ambiguous=actions_ambiguous,
+            notes=notes,
+        )
+        parse_diagnostics = TableParseDiagnostics(
+            pot_raw=pot_raw,
+            pot_parsed=pot_parsed if pot_parsed and pot_parsed > 0 else None,
+            legal_actions_raw=legal_actions_raw,
+            legal_actions_normalized=legal_actions_normalized,
+            actions_ambiguous=actions_ambiguous,
+            block_reason=block_reason,
         )
         self._trusted = TrustedTableState(
             hero_cards=hero_cards,
@@ -326,8 +384,75 @@ class TrustedTableStateManager:
             generation=generation,
             updated_at=now,
             state_confidence=confidence,
+            actions_ambiguous=actions_ambiguous,
+            parse_diagnostics=parse_diagnostics,
         )
         return self._trusted, self._trusted.to_snapshot(raw)
+
+    @staticmethod
+    def _resolve_legal_actions(
+        table_ocr: TableOCRResult | None,
+        ocr_lines: tuple[str, ...],
+    ) -> tuple[tuple[RecommendedAction, ...], tuple[str, ...], tuple[str, ...], bool]:
+        if table_ocr is not None and table_ocr.buttons:
+            return TrustedTableStateManager._actions_from_button_regions(table_ocr.buttons)
+        return collect_legal_actions_from_lines(ocr_lines)
+
+    @staticmethod
+    def _actions_from_button_regions(
+        buttons: tuple[ButtonOCRResult, ...],
+    ) -> tuple[tuple[RecommendedAction, ...], tuple[str, ...], tuple[str, ...], bool]:
+        merged: list[RecommendedAction] = []
+        raw_texts: list[str] = []
+        normalized: list[str] = []
+        seen: set[RecommendedAction] = set()
+        ambiguous = False
+        for button in buttons:
+            if button.raw_text:
+                raw_texts.append(f"{button.region_name}={button.raw_text!r}")
+            if button.ambiguous:
+                ambiguous = True
+                continue
+            allowed = set(allowed_labels_for_region(button.region_name))
+            labels = button.detected_labels or (
+                (button.normalized_label,) if button.normalized_label else ()
+            )
+            if not labels:
+                continue
+            for label in labels:
+                if label not in allowed:
+                    continue
+                normalized.append(label)
+                recommended = legal_action_to_recommended(label)
+                if recommended in seen:
+                    continue
+                merged.append(recommended)
+                seen.add(recommended)
+        return tuple(merged), tuple(raw_texts), tuple(normalized), ambiguous
+
+    @staticmethod
+    def _derive_block_reason(
+        hero_cards: tuple[str, ...],
+        board_cards: tuple[str, ...],
+        street: Street,
+        pot_size: float | None,
+        legal_actions: tuple[RecommendedAction, ...],
+        actions_ambiguous: bool,
+        notes: tuple[str, ...],
+    ) -> str | None:
+        if len(hero_cards) != 2:
+            return "hero cards missing"
+        if street is not Street.PREFLOP and len(board_cards) < 3:
+            return "board cards missing for street"
+        if pot_size is None or pot_size <= 0:
+            return "pot unreadable"
+        if actions_ambiguous:
+            return "actions ambiguous"
+        if not legal_actions:
+            return "legal actions missing"
+        if notes:
+            return notes[0]
+        return None
 
     @staticmethod
     def _street_from_board(board_cards: tuple[str, ...]) -> Street:
@@ -347,6 +472,7 @@ class TrustedTableStateManager:
         to_call: float | None,
         street: Street,
         legal_actions: tuple[RecommendedAction, ...],
+        actions_ambiguous: bool,
     ) -> tuple[TableStateConfidence, tuple[str, ...]]:
         notes: list[str] = []
         if len(hero_cards) != 2:
@@ -355,10 +481,12 @@ class TrustedTableStateManager:
             notes.append("board cards missing for street")
         if pot_size is None or pot_size <= 0:
             notes.append("pot unreadable")
-        if to_call is None:
-            notes.append("call amount missing")
+        if actions_ambiguous:
+            notes.append("actions ambiguous")
         if not legal_actions:
             notes.append("legal actions missing")
+        if to_call is None:
+            notes.append("call amount missing")
         if notes:
             return TableStateConfidence.LOW, tuple(notes)
         return TableStateConfidence.HIGH, ()

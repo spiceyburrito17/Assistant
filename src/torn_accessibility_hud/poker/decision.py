@@ -128,6 +128,7 @@ class DecisionEngine:
             state_confidence=snapshot.state_confidence,
             legal_actions=snapshot.legal_actions,
             solver_status=solver_status,
+            parse_diagnostics=snapshot.parse_diagnostics,
         )
 
     def _blocked_recommendation(
@@ -156,6 +157,7 @@ class DecisionEngine:
             legal_actions=snapshot.legal_actions,
             solver_status=solver_status,
             decision_blocked_reason=blocked_reason,
+            parse_diagnostics=snapshot.parse_diagnostics,
         )
 
     def _normalize_inputs(
