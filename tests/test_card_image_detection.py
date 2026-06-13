@@ -10,7 +10,9 @@ from torn_accessibility_hud.config import OCRConfig
 from torn_accessibility_hud.models import OCRLine, ScreenRegion
 from torn_accessibility_hud.vision.ocr_engine import (
     CardRegionDebugger,
+    detect_cards_from_ocr_bboxes,
     detect_suit_from_card_image,
+    detect_suit_near_rank_bbox,
     format_raw_ocr_debug_lines,
     is_probably_card_back,
     is_probably_folded_hero_region,
@@ -84,6 +86,32 @@ class CardImageDetectionTests(unittest.TestCase):
         self.assertEqual(debugger.regions["hero_cards_region"].width, 3)
         self.assertEqual(debugger.regions["board_cards_region"].left, 50)
         self.assertEqual(debugger._interval_for_region("hero_cards_region"), 0.0)
+
+    @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
+    def test_bbox_fallback_constructs_cards_from_rank_ocr_lines(self) -> None:
+        region = np.full((120, 180, 3), 245, dtype=np.uint8)
+        region[35:52, 15:32] = (0, 0, 190)
+        region[35:52, 95:112] = (0, 150, 0)
+        lines = (
+            OCRLine(text="8", confidence=0.97, bbox=((45, 60), (72, 60), (72, 84), (45, 84))),
+            OCRLine(text="A", confidence=0.91, bbox=((285, 60), (312, 60), (312, 84), (285, 84))),
+        )
+        cards, debug_lines = detect_cards_from_ocr_bboxes(region, lines, ocr_scale=3.0)
+        self.assertEqual(cards, ("8h", "Ac"))
+        self.assertTrue(any("ACCEPTED card=8h" in line for line in debug_lines))
+        self.assertTrue(any("ACCEPTED card=Ac" in line for line in debug_lines))
+
+    @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
+    def test_suit_roi_near_rank_bbox_uses_scaled_coordinates(self) -> None:
+        region = np.full((80, 80, 3), 245, dtype=np.uint8)
+        region[24:40, 12:28] = (210, 80, 0)
+        suit, debug_lines = detect_suit_near_rank_bbox(
+            region,
+            bbox=((30, 18), (66, 18), (66, 48), (30, 48)),
+            ocr_scale=3.0,
+        )
+        self.assertEqual(suit, "d")
+        self.assertTrue(any("rank_bbox_raw" in line for line in debug_lines))
 
     @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
     def test_detect_suit_from_colored_glyphs(self) -> None:

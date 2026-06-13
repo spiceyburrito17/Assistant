@@ -115,6 +115,82 @@ def detect_suit_from_card_image(card_bgr: np.ndarray[Any, Any]) -> str | None:
     return best_suit if best_score >= 8 else None
 
 
+def detect_suit_near_rank_bbox(
+    region_bgr: np.ndarray[Any, Any],
+    bbox: tuple[tuple[int, int], ...],
+    ocr_scale: float,
+) -> tuple[str | None, tuple[str, ...]]:
+    """Infer suit by sampling small raw-image ROIs around/below an OCR rank bbox."""
+
+    debug_lines: list[str] = []
+    if region_bgr.size == 0:
+        return None, ("[bbox fallback] SKIPPED suit detection - region image is empty",)
+    rank_box = _scaled_bbox_bounds(bbox, scale=max(ocr_scale, 1.0), image_shape=region_bgr.shape)
+    if rank_box is None:
+        return None, (f"[bbox fallback] SKIPPED suit detection - invalid bbox={bbox}",)
+    x0, y0, x1, y1 = rank_box
+    width = max(1, x1 - x0)
+    height = max(1, y1 - y0)
+    debug_lines.append(f"[bbox fallback] rank_bbox_raw=({x0},{y0},{x1},{y1}) size={width}x{height}")
+    candidates = (
+        ("below_rank", x0 - width, y1, x1 + width * 2, y1 + height * 3),
+        ("rank_and_below", x0 - width, y0, x1 + width * 2, y1 + height * 3),
+        ("wide_corner", x0 - width, y0, x1 + width * 4, y1 + height * 5),
+        ("tight_rank", x0 - max(2, width // 2), y0 - max(2, height // 2), x1 + width, y1 + height),
+    )
+    for label, rx0, ry0, rx1, ry1 in candidates:
+        roi = _clip_roi(region_bgr, rx0, ry0, rx1, ry1)
+        debug_lines.append(f"[bbox fallback] suit_roi {label} size={roi.shape[1]}x{roi.shape[0]} px")
+        if roi.size == 0:
+            debug_lines.append(f"[bbox fallback] suit_roi {label} SKIPPED - empty after clipping")
+            continue
+        suit = detect_suit_from_card_image(roi)
+        debug_lines.append(f"[bbox fallback] suit_roi {label} result={suit or 'None'}")
+        if suit is not None:
+            return suit, tuple(debug_lines)
+    return None, tuple(debug_lines)
+
+
+def _scaled_bbox_bounds(
+    bbox: tuple[tuple[int, int], ...],
+    scale: float,
+    image_shape: tuple[int, ...],
+) -> tuple[int, int, int, int] | None:
+    if not bbox:
+        return None
+    xs = [point[0] for point in bbox]
+    ys = [point[1] for point in bbox]
+    raw_x0 = int(min(xs) / scale)
+    raw_y0 = int(min(ys) / scale)
+    raw_x1 = int(max(xs) / scale)
+    raw_y1 = int(max(ys) / scale)
+    height, width = image_shape[:2]
+    x0 = max(0, min(width, raw_x0))
+    y0 = max(0, min(height, raw_y0))
+    x1 = max(0, min(width, raw_x1))
+    y1 = max(0, min(height, raw_y1))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return x0, y0, x1, y1
+
+
+def _clip_roi(
+    image: np.ndarray[Any, Any],
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+) -> np.ndarray[Any, Any]:
+    height, width = image.shape[:2]
+    left = max(0, min(width, int(x0)))
+    top = max(0, min(height, int(y0)))
+    right = max(0, min(width, int(x1)))
+    bottom = max(0, min(height, int(y1)))
+    if right <= left or bottom <= top:
+        return image[0:0, 0:0]
+    return image[top:bottom, left:right]
+
+
 def is_probably_card_back(card_bgr: np.ndarray[Any, Any]) -> bool:
     """Detect Torn card backs so unrevealed board cards are ignored."""
 
@@ -341,14 +417,28 @@ def detect_cards_from_region(
     ocr: EasyOCREngine,
     scale: float,
     ignore_folded: bool = False,
+    fallback_ocr_lines: tuple[OCRLine, ...] = (),
+    fallback_ocr_scale: float | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if ignore_folded and is_probably_folded_hero_region(region_bgr):
         return (), ("[detector] folded/greyed hero region detected; ignoring hero cards",)
     cards: list[str] = []
     seen: set[str] = set()
     debug_lines: list[str] = []
-    crops = find_card_face_crops(region_bgr)
+    crops, crop_debug_lines = find_card_face_crops_with_debug(region_bgr)
+    debug_lines.extend(crop_debug_lines)
     debug_lines.append(f"[detector] face_up_card_crops={len(crops)}")
+    if not crops and fallback_ocr_lines:
+        fallback_cards, fallback_debug_lines = detect_cards_from_ocr_bboxes(
+            region_bgr,
+            fallback_ocr_lines,
+            ocr_scale=fallback_ocr_scale or scale,
+        )
+        debug_lines.extend(fallback_debug_lines)
+        return fallback_cards, tuple(debug_lines)
+    if not crops:
+        debug_lines.append("[bbox fallback] SKIPPED - no fallback OCR lines available")
+        return (), tuple(debug_lines)
     for crop_index, crop in enumerate(crops):
         rank, rank_debug_lines = read_card_rank_from_crop_with_debug(
             crop,
@@ -365,6 +455,56 @@ def detect_cards_from_region(
         if card not in seen:
             cards.append(card)
             seen.add(card)
+    return tuple(cards), tuple(debug_lines)
+
+
+def detect_cards_from_ocr_bboxes(
+    region_bgr: np.ndarray[Any, Any],
+    ocr_lines: tuple[OCRLine, ...],
+    ocr_scale: float,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Build cards directly from EasyOCR rank bboxes when contour detection fails."""
+
+    debug_lines: list[str] = [
+        f"[bbox fallback] ENTERED raw_ocr_lines={len(ocr_lines)} ocr_scale={ocr_scale:.3f}"
+    ]
+    candidates: list[tuple[int, str, str, float]] = []
+    seen_locations: set[tuple[str, int, int]] = set()
+    for line_index, line in enumerate(ocr_lines):
+        rank = normalize_card_rank(line.text)
+        debug_lines.append(
+            f"[bbox fallback] raw_line_{line_index} text={line.text!r} "
+            f"confidence={line.confidence:.4f} bbox={line.bbox} rank={rank or 'None'}"
+        )
+        if rank is None:
+            debug_lines.append(f"[bbox fallback] raw_line_{line_index} SKIPPED - not a valid rank")
+            continue
+        bounds = _scaled_bbox_bounds(line.bbox, scale=max(ocr_scale, 1.0), image_shape=region_bgr.shape)
+        if bounds is None:
+            debug_lines.append(f"[bbox fallback] raw_line_{line_index} SKIPPED - invalid bbox after scaling")
+            continue
+        x0, y0, x1, y1 = bounds
+        location_key = (rank, x0 // 12, y0 // 12)
+        if location_key in seen_locations:
+            debug_lines.append(f"[bbox fallback] raw_line_{line_index} SKIPPED - duplicate nearby rank")
+            continue
+        suit, suit_debug_lines = detect_suit_near_rank_bbox(region_bgr, line.bbox, ocr_scale=ocr_scale)
+        debug_lines.extend(f"[bbox fallback] raw_line_{line_index} {entry}" for entry in suit_debug_lines)
+        if suit is None:
+            debug_lines.append(f"[bbox fallback] raw_line_{line_index} SKIPPED - suit not detected near bbox")
+            continue
+        card = f"{rank}{suit}"
+        seen_locations.add(location_key)
+        candidates.append((x0, card, rank, line.confidence))
+        debug_lines.append(f"[bbox fallback] raw_line_{line_index} ACCEPTED card={card} x={x0}")
+    cards: list[str] = []
+    seen_cards: set[str] = set()
+    for _x, card, _rank, _confidence in sorted(candidates, key=lambda item: item[0]):
+        if card in seen_cards:
+            continue
+        cards.append(card)
+        seen_cards.add(card)
+    debug_lines.append(f"[bbox fallback] detected_cards={' '.join(cards) if cards else '<none>'}")
     return tuple(cards), tuple(debug_lines)
 
 
@@ -497,6 +637,8 @@ class CardRegionDebugger:
                     ocr,
                     scale=self.config.card_ocr_scale,
                     ignore_folded=False,
+                    fallback_ocr_lines=region_raw_ocr,
+                    fallback_ocr_scale=self.config.card_ocr_scale,
                 )
                 expected_cards = 2 if region_name == "hero_cards_region" else 3
                 max_cards = 2 if region_name == "hero_cards_region" else 5
