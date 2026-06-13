@@ -12,7 +12,7 @@ import numpy as np
 from ..config import OCRConfig, RegionsConfig
 from ..diagnostics import debug_log
 from ..models import ButtonOCRResult, OCRLine, PotOCRResult, TableOCRResult
-from ..parsing.amounts import parse_pot_amount_from_text
+from ..parsing.pot_parser import parse_pot_region_text
 from ..parsing.legal_actions import (
     allowed_labels_for_region,
     expected_label_for_button_region,
@@ -95,23 +95,27 @@ class TableRegionReader:
             raw_lines = ocr.read_raw(processed, allowlist=allowlist)
             combined_text = " ".join(line.text for line in raw_lines).strip()
             best_confidence = max((line.confidence for line in raw_lines), default=0.0)
-            parsed = parse_pot_amount_from_text(combined_text)
+            pot_parse = parse_pot_region_text(combined_text)
             if prefix is not None:
                 debug_lines = (
                     f"=== pot OCR frame {frame_id:06d} region=pot_region ===",
                     f"allowlist={allowlist!r}",
-                    f"raw_text={combined_text!r}",
+                    f"pot_raw={combined_text!r}",
+                    f"pot_candidate={pot_parse.candidate!r}",
+                    f"pot_normalized={pot_parse.normalized!r}",
+                    f"parse_status={pot_parse.status}",
                     f"ocr_confidence={best_confidence:.4f}",
-                    f"parsed_amount={parsed!r}",
                     *format_raw_ocr_debug_lines("pot_region.preprocessed", raw_lines, allowlist),
                 )
                 self._save_debug_images(prefix, raw, processed, debug_lines)
             self.last_saved_at[self.POT_REGION] = time.monotonic()
             return PotOCRResult(
                 raw_text=combined_text,
-                parsed_amount=parsed,
+                parsed_amount=pot_parse.normalized,
                 ocr_confidence=best_confidence,
                 allowlist=allowlist,
+                pot_candidate=pot_parse.candidate,
+                parse_status=pot_parse.status,
             )
         except Exception as exc:  # noqa: BLE001
             self.last_error = f"pot_region OCR failed: {type(exc).__name__}: {exc}"

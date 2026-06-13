@@ -97,6 +97,8 @@ class PotOCRResult:
     parsed_amount: float | None
     ocr_confidence: float
     allowlist: str
+    pot_candidate: str | None = None
+    parse_status: str = ""
 
 
 @dataclass(frozen=True)
@@ -121,7 +123,10 @@ class TableOCRResult:
 @dataclass(frozen=True)
 class TableParseDiagnostics:
     pot_raw: str | None = None
+    pot_candidate: str | None = None
     pot_parsed: float | None = None
+    pot_normalized: float | None = None
+    pot_rejected_reason: str | None = None
     legal_actions_raw: tuple[str, ...] = ()
     legal_actions_normalized: tuple[str, ...] = ()
     actions_ambiguous: bool = False

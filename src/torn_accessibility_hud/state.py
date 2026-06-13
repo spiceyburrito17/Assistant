@@ -18,6 +18,7 @@ from .models import (
     TableStateConfidence,
 )
 from .parsing.amounts import parse_to_call_from_button_text
+from .parsing.pot_sanity import validate_pot_update
 from .parsing.legal_actions import (
     allowed_labels_for_region,
     collect_legal_actions_from_lines,
@@ -238,10 +239,12 @@ class TrustedTableStateManager:
 
         hero_event = self._latest_event(events, ActionType.DEALT_HERO)
         board_event = self._latest_event(events, ActionType.BOARD)
+        hand_reset = False
 
         if hero_event is not None and len(hero_event.cards) == 2:
             if hero_event.cards != hero_cards:
                 debug_log("[TRUST] new hero hand %s", list(hero_event.cards))
+                hand_reset = True
                 board_cards = ()
                 pot_size = None
                 to_call = None
@@ -286,7 +289,10 @@ class TrustedTableStateManager:
             self._board_missing_scans = 0
 
         pot_raw: str | None = self._trusted.parse_diagnostics.pot_raw if self._trusted.parse_diagnostics else None
-        pot_parsed: float | None = pot_size
+        pot_candidate: str | None = None
+        pot_normalized: float | None = pot_size
+        pot_rejected_reason: str | None = None
+        previous_pot = self._trusted.pot_size
 
         for event in events:
             if event.action is not ActionType.POT or event.amount is None:
@@ -294,13 +300,48 @@ class TrustedTableStateManager:
             if event.raw_text.lower().startswith("to_call"):
                 to_call = max(0.0, event.amount)
             elif event.amount > 0 and pot_size is None:
-                pot_size = event.amount
+                accepted, reject_reason = validate_pot_update(
+                    event.amount,
+                    previous=previous_pot if not hand_reset else None,
+                    hand_reset=hand_reset,
+                )
+                if accepted is not None:
+                    pot_size = accepted
+                    pot_normalized = accepted
+                else:
+                    pot_rejected_reason = reject_reason
+                    pot_size = previous_pot if not hand_reset else None
+                    pot_normalized = pot_size
 
         if table_ocr is not None and table_ocr.pot is not None:
             pot_raw = table_ocr.pot.raw_text or pot_raw
+            pot_candidate = table_ocr.pot.pot_candidate
             if table_ocr.pot.parsed_amount is not None and table_ocr.pot.parsed_amount > 0:
-                pot_size = table_ocr.pot.parsed_amount
-                pot_parsed = table_ocr.pot.parsed_amount
+                accepted, reject_reason = validate_pot_update(
+                    table_ocr.pot.parsed_amount,
+                    previous=previous_pot if not hand_reset else None,
+                    hand_reset=hand_reset,
+                )
+                if accepted is not None:
+                    pot_size = accepted
+                    pot_normalized = accepted
+                    debug_log(
+                        "[TRUST] pot accepted raw=%r candidate=%r normalized=%s",
+                        pot_raw,
+                        pot_candidate,
+                        pot_normalized,
+                    )
+                else:
+                    pot_rejected_reason = reject_reason
+                    pot_size = previous_pot if not hand_reset else None
+                    pot_normalized = pot_size
+                    debug_log(
+                        "[TRUST] pot rejected raw=%r candidate=%r reason=%s keeping=%s",
+                        pot_raw,
+                        pot_candidate,
+                        reject_reason,
+                        pot_size,
+                    )
             elif table_ocr.pot_region_scanned and not table_ocr.pot.raw_text:
                 debug_log("[TRUST] pot region scanned but empty OCR")
 
@@ -328,9 +369,19 @@ class TrustedTableStateManager:
                 if call_amount is not None and call_amount > 0:
                     to_call = call_amount
 
-        if raw.pot_size > 0 and pot_size is None:
-            pot_size = raw.pot_size
-            pot_parsed = raw.pot_size
+        if raw.pot_size > 0 and pot_size is None and pot_rejected_reason is None:
+            accepted, reject_reason = validate_pot_update(
+                raw.pot_size,
+                previous=previous_pot if not hand_reset else None,
+                hand_reset=hand_reset,
+            )
+            if accepted is not None:
+                pot_size = accepted
+                pot_normalized = accepted
+            else:
+                pot_rejected_reason = reject_reason
+                pot_size = previous_pot if not hand_reset else None
+                pot_normalized = pot_size
         if raw.to_call > 0:
             to_call = raw.to_call
         elif any(
@@ -368,7 +419,10 @@ class TrustedTableStateManager:
         )
         parse_diagnostics = TableParseDiagnostics(
             pot_raw=pot_raw,
-            pot_parsed=pot_parsed if pot_parsed and pot_parsed > 0 else None,
+            pot_candidate=pot_candidate,
+            pot_parsed=pot_normalized if pot_normalized and pot_normalized > 0 else None,
+            pot_normalized=pot_normalized if pot_normalized and pot_normalized > 0 else None,
+            pot_rejected_reason=pot_rejected_reason,
             legal_actions_raw=legal_actions_raw,
             legal_actions_normalized=legal_actions_normalized,
             actions_ambiguous=actions_ambiguous,

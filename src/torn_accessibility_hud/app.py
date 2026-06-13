@@ -196,9 +196,14 @@ class CoordinatorWorker(threading.Thread):
         }
         if parse_diag is not None:
             diagnostics["pot_raw"] = parse_diag.pot_raw or "--"
-            diagnostics["pot_parsed"] = (
-                f"{parse_diag.pot_parsed:,.0f}" if parse_diag.pot_parsed is not None else "--"
+            diagnostics["pot_candidate"] = parse_diag.pot_candidate or "--"
+            diagnostics["pot_normalized"] = (
+                f"{parse_diag.pot_normalized:,.0f}"
+                if parse_diag.pot_normalized is not None
+                else "--"
             )
+            if parse_diag.pot_rejected_reason:
+                diagnostics["pot_rejected_reason"] = parse_diag.pot_rejected_reason
             diagnostics["legal_actions_raw"] = "|".join(parse_diag.legal_actions_raw) or "--"
             diagnostics["legal_actions_normalized"] = ",".join(parse_diag.legal_actions_normalized) or "--"
             if parse_diag.block_reason:

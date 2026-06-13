@@ -9,7 +9,8 @@ from pathlib import Path
 
 from ..config import ParserConfig
 from ..models import ActionType, OCRLine, ParsedEvent, Street
-from .amounts import parse_chip_amount, parse_pot_amount_from_text
+from .amounts import parse_chip_amount
+from .pot_parser import parse_pot_text
 from .cards import normalize_ocr_text, parse_cards, validate_cards
 
 _AMOUNT_RE = re.compile(r"(?<![a-z])(?:[$£€])?\s*([0-9][0-9,]*(?:\.[0-9]+)?)")
@@ -116,7 +117,7 @@ class ActionLogParser:
         to_call_match = _TO_CALL_RE.search(text)
         if pot_match is None and to_call_match is None:
             return None
-        amount = parse_pot_amount_from_text(text, max_reasonable=self.config.max_reasonable_amount)
+        amount, _status = parse_pot_text(text)
         if amount is None:
             return None
         action = ActionType.POT

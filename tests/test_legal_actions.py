@@ -1,7 +1,8 @@
 import unittest
 
 from torn_accessibility_hud.models import ButtonOCRResult, GameSnapshot, PotOCRResult, RecommendedAction, TableOCRResult
-from torn_accessibility_hud.parsing.amounts import parse_pot_amount_from_text, parse_to_call_from_button_text
+from torn_accessibility_hud.parsing.amounts import parse_to_call_from_button_text
+from torn_accessibility_hud.parsing.pot_parser import parse_pot_text
 from torn_accessibility_hud.parsing.legal_actions import (
     extract_actions_from_region_text,
     normalize_action_text,
@@ -42,7 +43,8 @@ class LegalActionNormalizationTests(unittest.TestCase):
 
 class PotParsingTests(unittest.TestCase):
     def test_pot_amount_parses_currency(self) -> None:
-        self.assertEqual(parse_pot_amount_from_text("$1,250"), 1250.0)
+        amount, _status = parse_pot_text("POT: $1,250")
+        self.assertEqual(amount, 1250.0)
 
     def test_call_button_amount_parses_to_call(self) -> None:
         self.assertEqual(parse_to_call_from_button_text("Call 150"), 150.0)
