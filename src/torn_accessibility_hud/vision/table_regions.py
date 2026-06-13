@@ -101,7 +101,8 @@ class TableRegionReader:
                     f"=== pot OCR frame {frame_id:06d} region=pot_region ===",
                     f"allowlist={allowlist!r}",
                     f"pot_crop_text={combined_text!r}",
-                    f"pot_anchor_index={pot_parse.pot_anchor_index!r}",
+                    f"pot_anchor_match={pot_parse.pot_anchor_match!r}",
+                    f"pot_anchor_confidence={pot_parse.pot_anchor_confidence!r}",
                     f"pot_digits_start={pot_parse.pot_digits_start!r}",
                     f"pot_candidate={pot_parse.candidate!r}",
                     f"pot_normalized={pot_parse.normalized!r}",
@@ -119,6 +120,8 @@ class TableRegionReader:
                 pot_candidate=pot_parse.candidate,
                 parse_status=pot_parse.status,
                 pot_anchor_index=pot_parse.pot_anchor_index,
+                pot_anchor_match=pot_parse.pot_anchor_match,
+                pot_anchor_confidence=pot_parse.pot_anchor_confidence,
                 pot_digits_start=pot_parse.pot_digits_start,
             )
         except Exception as exc:  # noqa: BLE001

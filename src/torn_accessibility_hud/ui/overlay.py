@@ -171,7 +171,11 @@ class TkOverlay:
             crop_text = parse_diag.pot_crop_text or parse_diag.pot_raw or "--"
             summary_lines.append(f"pot_crop_text={crop_text}")
             summary_lines.append(
-                f"pot_anchor_index={parse_diag.pot_anchor_index if parse_diag.pot_anchor_index is not None else '--'}"
+                f"pot_anchor_match={parse_diag.pot_anchor_match or '--'}"
+            )
+            summary_lines.append(
+                "pot_anchor_confidence="
+                f"{parse_diag.pot_anchor_confidence if parse_diag.pot_anchor_confidence is not None else '--'}"
             )
             summary_lines.append(
                 f"pot_digits_start={parse_diag.pot_digits_start if parse_diag.pot_digits_start is not None else '--'}"

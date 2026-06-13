@@ -291,6 +291,8 @@ class TrustedTableStateManager:
         pot_raw: str | None = self._trusted.parse_diagnostics.pot_raw if self._trusted.parse_diagnostics else None
         pot_crop_text: str | None = pot_raw
         pot_anchor_index: int | None = None
+        pot_anchor_match: str | None = None
+        pot_anchor_confidence: float | None = None
         pot_digits_start: int | None = None
         pot_candidate: str | None = None
         pot_normalized: float | None = pot_size
@@ -321,6 +323,8 @@ class TrustedTableStateManager:
             pot_crop_text = pot_raw
             pot_candidate = table_ocr.pot.pot_candidate
             pot_anchor_index = table_ocr.pot.pot_anchor_index
+            pot_anchor_match = table_ocr.pot.pot_anchor_match
+            pot_anchor_confidence = table_ocr.pot.pot_anchor_confidence
             pot_digits_start = table_ocr.pot.pot_digits_start
             if table_ocr.pot.parsed_amount is not None and table_ocr.pot.parsed_amount > 0:
                 accepted, reject_reason = validate_pot_update(
@@ -427,6 +431,8 @@ class TrustedTableStateManager:
             pot_raw=pot_raw,
             pot_crop_text=pot_crop_text,
             pot_anchor_index=pot_anchor_index,
+            pot_anchor_match=pot_anchor_match,
+            pot_anchor_confidence=pot_anchor_confidence,
             pot_digits_start=pot_digits_start,
             pot_candidate=pot_candidate,
             pot_parsed=pot_normalized if pot_normalized and pot_normalized > 0 else None,

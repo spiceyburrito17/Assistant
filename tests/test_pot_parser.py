@@ -39,9 +39,31 @@ class PotParserTests(unittest.TestCase):
 
     def test_prefix_debug_indices(self) -> None:
         result = parse_pot_text_detailed("POT: 5660")
-        self.assertEqual(result.pot_anchor_index, 0)
+        self.assertEqual(result.pot_anchor_match, "POT")
+        self.assertEqual(result.pot_anchor_confidence, 1.0)
         self.assertEqual(result.pot_digits_start, 6)
         self.assertEqual(result.candidate, "660")
+
+    def test_fuzzy_anchor_poi(self) -> None:
+        amount, status = parse_pot_text("POI: $660")
+        self.assertEqual(amount, 660.0)
+        self.assertEqual(status, "ok")
+
+    def test_fuzzy_anchor_po7(self) -> None:
+        amount, status = parse_pot_text("PO7: 5660")
+        self.assertEqual(amount, 660.0)
+        self.assertEqual(status, "ok")
+
+    def test_fuzzy_anchor_p0t(self) -> None:
+        amount, status = parse_pot_text("P0T: $540")
+        self.assertEqual(amount, 540.0)
+        self.assertEqual(status, "ok")
+
+    def test_weak_fuzzy_anchor_with_short_digits_rejects(self) -> None:
+        result = parse_pot_text_detailed("POI: 63")
+        self.assertIsNone(result.normalized)
+        self.assertEqual(result.status, "weak_anchor_and_digits")
+        self.assertEqual(result.candidate, "63")
 
     def test_no_pot_marker_rejects(self) -> None:
         result = parse_pot_region_text("5660")

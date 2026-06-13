@@ -100,6 +100,8 @@ class PotOCRResult:
     pot_candidate: str | None = None
     parse_status: str = ""
     pot_anchor_index: int | None = None
+    pot_anchor_match: str | None = None
+    pot_anchor_confidence: float | None = None
     pot_digits_start: int | None = None
 
 
@@ -127,6 +129,8 @@ class TableParseDiagnostics:
     pot_raw: str | None = None
     pot_crop_text: str | None = None
     pot_anchor_index: int | None = None
+    pot_anchor_match: str | None = None
+    pot_anchor_confidence: float | None = None
     pot_digits_start: int | None = None
     pot_candidate: str | None = None
     pot_parsed: float | None = None
