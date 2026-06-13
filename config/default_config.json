@@ -48,7 +48,7 @@
   "overlay": {
     "title": "Torn Accessibility HUD",
     "width": 440,
-    "height": 260,
+    "height": 360,
     "x": 20,
     "y": 20,
     "alpha": 0.86,

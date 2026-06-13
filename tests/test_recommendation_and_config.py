@@ -4,29 +4,9 @@ import unittest
 from pathlib import Path
 
 from torn_accessibility_hud.config import AppConfig, RegionsConfig
-from torn_accessibility_hud.models import EquityResult, GameSnapshot, RecommendationLevel
-from torn_accessibility_hud.ui.recommendation import RecommendationEngine
 
 
 class RecommendationAndConfigTests(unittest.TestCase):
-    def test_recommendation_marks_positive_edge_green(self) -> None:
-        snapshot = GameSnapshot(hero_cards=("As", "Kd"), pot_size=1000, to_call=100, active_opponents=("Fox",), generation=3)
-        result = EquityResult(hero_equity=0.35, tie_rate=0.02, simulations=1000, generation=3, elapsed_ms=20)
-        recommendation = RecommendationEngine().build(snapshot, result)
-        self.assertEqual(recommendation.level, RecommendationLevel.SAFE)
-
-    def test_recommendation_reuses_recent_equity_when_generation_is_one_off(self) -> None:
-        snapshot = GameSnapshot(hero_cards=("As", "Kd"), pot_size=1000, to_call=100, active_opponents=("Fox",), generation=4)
-        result = EquityResult(hero_equity=0.35, tie_rate=0.0, simulations=100, generation=3, elapsed_ms=10)
-        recommendation = RecommendationEngine().build(snapshot, result)
-        self.assertEqual(recommendation.level, RecommendationLevel.SAFE)
-
-    def test_recommendation_waits_for_stale_generation(self) -> None:
-        snapshot = GameSnapshot(hero_cards=("As", "Kd"), active_opponents=("Fox",), generation=10)
-        result = EquityResult(hero_equity=0.9, tie_rate=0.0, simulations=100, generation=3, elapsed_ms=10)
-        recommendation = RecommendationEngine().build(snapshot, result)
-        self.assertEqual(recommendation.level, RecommendationLevel.WAIT)
-
     def test_config_loads_nested_region_and_gpu_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "config.json"

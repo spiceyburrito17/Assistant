@@ -6,7 +6,7 @@ import queue
 import tkinter as tk
 
 from ..config import OverlayConfig
-from ..models import OverlayState, RecommendationLevel
+from ..models import DecisionConfidence, OverlayState, RecommendedAction
 
 
 class TkOverlay:
@@ -18,7 +18,7 @@ class TkOverlay:
         self.root: tk.Tk | None = None
         self.title_var: tk.StringVar | None = None
         self.detail_var: tk.StringVar | None = None
-        self.cards_var: tk.StringVar | None = None
+        self.summary_var: tk.StringVar | None = None
         self.stats_var: tk.StringVar | None = None
         self.log_var: tk.StringVar | None = None
         self.title_label: tk.Label | None = None
@@ -47,14 +47,14 @@ class TkOverlay:
 
         self.title_var = tk.StringVar(value="WAIT")
         self.detail_var = tk.StringVar(value="Waiting for stable OCR.")
-        self.cards_var = tk.StringVar(value="Cards: --")
+        self.summary_var = tk.StringVar(value="")
         self.stats_var = tk.StringVar(value="Opponents: --")
         self.log_var = tk.StringVar(value="")
 
         self.title_label = tk.Label(
             self.root,
             textvariable=self.title_var,
-            font=("Helvetica", 30, "bold"),
+            font=("Helvetica", 28, "bold"),
             bg=self.config.background_hex,
             fg="#3498DB",
         )
@@ -62,26 +62,27 @@ class TkOverlay:
         detail = tk.Label(
             self.root,
             textvariable=self.detail_var,
-            font=("Helvetica", 13),
+            font=("Helvetica", 11),
             wraplength=self.config.width - 24,
-            justify="center",
+            justify="left",
             bg=self.config.background_hex,
             fg=self.config.text_hex,
         )
-        detail.pack(fill="x", padx=10, pady=(4, 8))
-        cards = tk.Label(
+        detail.pack(fill="x", padx=12, pady=(4, 6))
+        summary = tk.Label(
             self.root,
-            textvariable=self.cards_var,
-            font=("Helvetica", 12, "bold"),
+            textvariable=self.summary_var,
+            font=("Consolas", 11),
             bg=self.config.background_hex,
             fg=self.config.text_hex,
             justify="left",
+            anchor="nw",
         )
-        cards.pack(fill="x", padx=12)
+        summary.pack(fill="x", padx=12)
         stats = tk.Label(
             self.root,
             textvariable=self.stats_var,
-            font=("Helvetica", 10),
+            font=("Helvetica", 9),
             bg=self.config.background_hex,
             fg=self.config.text_hex,
             justify="left",
@@ -123,33 +124,69 @@ class TkOverlay:
         assert self.root is not None
         assert self.title_var is not None
         assert self.detail_var is not None
-        assert self.cards_var is not None
+        assert self.summary_var is not None
         assert self.stats_var is not None
         assert self.log_var is not None
         assert self.title_label is not None
 
         recommendation = state.recommendation
+        snapshot = state.snapshot
         self.title_var.set(recommendation.title)
         self.detail_var.set(recommendation.detail)
-        title_color = recommendation.color_hex
-        if recommendation.level is RecommendationLevel.UNKNOWN:
-            title_color = "#95A5A6"
-        self.title_label.configure(fg=title_color)
+        self.title_label.configure(fg=recommendation.color_hex)
 
-        snapshot = state.snapshot
         hero = " ".join(snapshot.hero_cards) if snapshot.hero_cards else "--"
         board = " ".join(snapshot.board_cards) if snapshot.board_cards else "--"
-        self.cards_var.set(
-            f"Hero: {hero}    Board: {board}\nPot: {snapshot.pot_size:,.0f}    To call: {snapshot.to_call:,.0f}"
-        )
+        equity = self._format_percent(recommendation.equity)
+        required = self._format_percent(recommendation.required_equity)
+        edge = self._format_edge(recommendation.edge)
+        action = recommendation.action.value.upper()
+        confidence = recommendation.confidence.value.upper()
+        summary_lines = [
+            f"Hero:       {hero}",
+            f"Board:      {board}",
+            f"Pot:        {snapshot.pot_size:,.0f}",
+            f"To call:    {snapshot.to_call:,.0f}",
+            f"Equity:     {equity}",
+            f"Required:   {required}",
+            f"Edge:       {edge}",
+            f"Action:     {action}",
+            f"Confidence: {confidence}",
+        ]
+        if recommendation.action is RecommendedAction.RAISE and recommendation.raise_sizing is not None:
+            sizing = recommendation.raise_sizing
+            summary_lines.extend(
+                [
+                    f"Min raise:  {sizing.min_raise:,.0f}",
+                    f"Half pot:   {sizing.half_pot:,.0f}",
+                    f"Two-thirds: {sizing.two_thirds_pot:,.0f}",
+                    f"Pot:        {sizing.pot:,.0f}",
+                ]
+            )
+        if recommendation.confidence is DecisionConfidence.LOW and recommendation.confidence_notes:
+            summary_lines.append(f"Notes:      {', '.join(recommendation.confidence_notes)}")
+        self.summary_var.set("\n".join(summary_lines))
+
         if snapshot.opponent_stats:
             rendered = []
-            for stat in snapshot.opponent_stats[:4]:
+            for stat in snapshot.opponent_stats[:3]:
                 rendered.append(
                     f"{stat.player_name}: VPIP {stat.vpip:.0%} PFR {stat.pfr:.0%} "
-                    f"last {stat.last_action} range {','.join(stat.top_range_classes[:3])}"
+                    f"last {stat.last_action}"
                 )
             self.stats_var.set("\n".join(rendered))
         else:
             self.stats_var.set("Opponents: waiting for readable actions")
-        self.log_var.set("\n".join(state.latest_lines[-4:]))
+        self.log_var.set("\n".join(state.latest_lines[-3:]))
+
+    @staticmethod
+    def _format_percent(value: float | None) -> str:
+        if value is None:
+            return "--"
+        return f"{value:.1%}"
+
+    @staticmethod
+    def _format_edge(value: float | None) -> str:
+        if value is None:
+            return "--"
+        return f"{value:+.1%}"

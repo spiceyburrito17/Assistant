@@ -39,6 +39,19 @@ class RecommendationLevel(str, Enum):
     UNKNOWN = "unknown"
 
 
+class RecommendedAction(str, Enum):
+    FOLD = "fold"
+    CALL = "call"
+    CHECK = "check"
+    RAISE = "raise"
+    WAIT = "wait"
+
+
+class DecisionConfidence(str, Enum):
+    HIGH = "high"
+    LOW = "low"
+
+
 @dataclass(frozen=True)
 class ScreenRegion:
     """A rectangular screen region in physical pixels."""
@@ -134,15 +147,36 @@ class EquityResult:
 
 
 @dataclass(frozen=True)
+class RaiseSizing:
+    """Suggested total wager sizes for a raise/bet line."""
+
+    min_raise: float
+    half_pot: float
+    two_thirds_pot: float
+    pot: float
+
+
+@dataclass(frozen=True)
 class Recommendation:
-    """Color-coded display recommendation."""
+    """Color-coded decision output for the overlay."""
 
     level: RecommendationLevel
     title: str
     detail: str
     color_hex: str
+    action: RecommendedAction = RecommendedAction.WAIT
+    confidence: DecisionConfidence = DecisionConfidence.LOW
+    confidence_notes: tuple[str, ...] = ()
     equity: float | None = None
-    pot_odds: float | None = None
+    required_equity: float | None = None
+    edge: float | None = None
+    raise_sizing: RaiseSizing | None = None
+
+    @property
+    def pot_odds(self) -> float | None:
+        """Backward-compatible alias for required equity."""
+
+        return self.required_equity
 
 
 @dataclass(frozen=True)

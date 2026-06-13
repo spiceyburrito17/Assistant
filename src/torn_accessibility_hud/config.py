@@ -71,7 +71,7 @@ class EquityConfig:
 class OverlayConfig:
     title: str = "Torn Accessibility HUD"
     width: int = 440
-    height: int = 260
+    height: int = 360
     x: int = 20
     y: int = 20
     alpha: float = 0.86
@@ -265,7 +265,7 @@ def write_default_config(path: str | Path) -> Path:
         "overlay": {
             "title": "Torn Accessibility HUD",
             "width": 440,
-            "height": 260,
+            "height": 360,
             "x": 20,
             "y": 20,
             "alpha": 0.86,
