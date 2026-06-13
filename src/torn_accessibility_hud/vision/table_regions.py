@@ -16,7 +16,7 @@ from ..parsing.pot_parser import parse_pot_region_text
 from ..parsing.legal_actions import (
     allowed_labels_for_region,
     expected_label_for_button_region,
-    extract_actions_from_region_text,
+    extract_actions_for_button_region,
 )
 from .ocr_engine import EasyOCREngine, format_raw_ocr_debug_lines, preprocess_card_region
 
@@ -162,7 +162,7 @@ class TableRegionReader:
             raw_lines = ocr.read_raw(processed, allowlist=allowlist)
             raw_text = " ".join(line.text for line in raw_lines).strip()
             ocr_confidence = max((line.confidence for line in raw_lines), default=0.0)
-            extracted = extract_actions_from_region_text(raw_text, ocr_confidence=ocr_confidence)
+            extracted = extract_actions_for_button_region(region_name, raw_text, ocr_confidence)
             detected_labels = tuple(action.label for action in extracted)
             normalized_label = detected_labels[0] if detected_labels else None
             confidence = max((action.confidence for action in extracted), default=0.0)

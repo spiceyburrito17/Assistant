@@ -7,6 +7,12 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from ..models import RecommendedAction
+from .amounts import (
+    call_amount_present,
+    isolate_button_slot_text,
+    isolate_call_slot_text,
+    raise_to_pattern_present,
+)
 
 LEGAL_ACTION_LABELS: tuple[str, ...] = ("fold", "check", "call", "bet", "raise")
 _AMBIGUITY_MARGIN = 0.08
@@ -17,11 +23,11 @@ _CALL_BIAS_TOKENS = ("ll", "al", "cal")
 # Torn reuses physical button areas: left slot may show Call/Raise/Check; the wide
 # center box often contains "Check" and "Fold" together.
 REGION_SLOT_LABELS: dict[str, tuple[str, ...]] = {
-    "fold_button_region": ("fold", "check"),
+    "fold_button_region": ("fold",),
     "check_button_region": ("check", "fold"),
-    "call_button_region": ("call", "check", "raise", "bet"),
-    "raise_button_region": ("raise", "call", "bet", "check"),
-    "bet_button_region": ("bet", "raise", "call"),
+    "call_button_region": ("call", "check"),
+    "raise_button_region": ("raise", "bet"),
+    "bet_button_region": ("bet", "raise"),
 }
 
 
@@ -42,6 +48,8 @@ def _clean_action_text(text: str) -> str:
 def _score_label(cleaned: str, label: str) -> float:
     if not cleaned:
         return 0.0
+    if label == "raise" and re.search(r"\braise\s+to\b", cleaned):
+        return 0.98
     if cleaned == label:
         return 1.0
     if cleaned.startswith(label):
@@ -98,9 +106,88 @@ def normalize_action_text(text: str, ocr_confidence: float = 1.0) -> NormalizedL
 def extract_actions_from_region_text(
     text: str,
     ocr_confidence: float = 1.0,
+    *,
+    region_name: str | None = None,
 ) -> tuple[NormalizedLegalAction, ...]:
-    """Extract one or more action labels from a possibly wide/shared button crop."""
+    """Extract action labels from one button crop."""
 
+    if region_name is not None:
+        return extract_actions_for_button_region(region_name, text, ocr_confidence)
+
+    return _extract_actions_from_cleaned_text(text, ocr_confidence)
+
+
+def extract_actions_for_button_region(
+    region_name: str,
+    text: str,
+    ocr_confidence: float = 1.0,
+) -> tuple[NormalizedLegalAction, ...]:
+    isolated = isolate_button_slot_text(region_name, text)
+    allowed = set(allowed_labels_for_region(region_name))
+    cleaned = _clean_action_text(isolated)
+    if not cleaned:
+        return ()
+
+    if region_name == "raise_button_region" and raise_to_pattern_present(isolated):
+        return (
+            NormalizedLegalAction(
+                label="raise",
+                confidence=max(0.0, min(1.0, 0.98 * max(ocr_confidence, 0.1))),
+                raw_text=text.strip(),
+                ambiguous=False,
+            ),
+        )
+
+    present = [
+        label
+        for label in LEGAL_ACTION_LABELS
+        if label in allowed
+        and _label_clearly_present(cleaned, label)
+        and _score_label(cleaned, label) >= _MIN_MATCH_SCORE
+    ]
+    if not present:
+        single = normalize_action_text(isolated, ocr_confidence=ocr_confidence)
+        if single is None or single.ambiguous or single.label not in allowed:
+            return ()
+        return (single,)
+
+    if len(present) == 1:
+        label = present[0]
+        return (
+            NormalizedLegalAction(
+                label=label,
+                confidence=max(0.0, min(1.0, _score_label(cleaned, label) * max(ocr_confidence, 0.1))),
+                raw_text=text.strip(),
+                ambiguous=False,
+            ),
+        )
+
+    if region_name == "call_button_region" and {"check", "call"}.issuperset(present):
+        if "call" in present and call_amount_present(isolated):
+            present = [label for label in present if label != "check"]
+        elif "check" in present:
+            present = [label for label in present if label != "call"]
+
+    results: list[NormalizedLegalAction] = []
+    for label in LEGAL_ACTION_LABELS:
+        if label not in present:
+            continue
+        score = _score_label(cleaned, label)
+        results.append(
+            NormalizedLegalAction(
+                label=label,
+                confidence=max(0.0, min(1.0, score * max(ocr_confidence, 0.1))),
+                raw_text=text.strip(),
+                ambiguous=False,
+            )
+        )
+    return tuple(results)
+
+
+def _extract_actions_from_cleaned_text(
+    text: str,
+    ocr_confidence: float,
+) -> tuple[NormalizedLegalAction, ...]:
     cleaned = _clean_action_text(text)
     if not cleaned:
         return ()

@@ -223,6 +223,11 @@ class CoordinatorWorker(threading.Thread):
                 if parse_diag.amount_to_call_parsed is not None
                 else "--"
             )
+            diagnostics["fold_button_raw"] = parse_diag.fold_button_raw or "--"
+            diagnostics["call_button_raw"] = parse_diag.call_button_raw or "--"
+            diagnostics["raise_button_raw"] = parse_diag.raise_button_raw or "--"
+            if parse_diag.button_overlap_suspected:
+                diagnostics["button_overlap_suspected"] = parse_diag.button_overlap_suspected
             if parse_diag.block_reason:
                 diagnostics["block_reason"] = parse_diag.block_reason
         block_reason = recommendation.decision_blocked_reason or (

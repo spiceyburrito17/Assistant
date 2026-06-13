@@ -381,6 +381,9 @@ class TrustedTableStateManager:
         amount_to_call_raw: str | None = None
         amount_to_call_parsed: float | None = None
         action_block_reason: str | None = None
+        fold_button_raw, raise_button_raw, button_overlap_suspected = self._button_region_diagnostics(
+            table_ocr
+        )
         call_button_raw = self._call_button_raw_text(table_ocr)
         if table_ocr is not None and table_ocr.action_regions_scanned:
             validated = validate_action_inputs(
@@ -388,6 +391,7 @@ class TrustedTableStateManager:
                 raw_entries=legal_actions_raw,
                 actions_ambiguous=actions_ambiguous,
                 call_button_raw=call_button_raw,
+                raise_button_raw=raise_button_raw,
                 action_regions_scanned=True,
             )
             legal_actions = validated.legal_actions
@@ -497,6 +501,10 @@ class TrustedTableStateManager:
             legal_actions_normalized=legal_actions_normalized,
             amount_to_call_raw=amount_to_call_raw,
             amount_to_call_parsed=amount_to_call_parsed,
+            fold_button_raw=fold_button_raw,
+            call_button_raw=call_button_raw,
+            raise_button_raw=raise_button_raw,
+            button_overlap_suspected=button_overlap_suspected,
             actions_ambiguous=actions_ambiguous,
             block_reason=block_reason,
         )
@@ -564,6 +572,38 @@ class TrustedTableStateManager:
             if button.region_name == "call_button_region" and button.raw_text:
                 return button.raw_text
         return None
+
+    @staticmethod
+    def _button_region_diagnostics(
+        table_ocr: TableOCRResult | None,
+    ) -> tuple[str | None, str | None, str | None]:
+        from .parsing.amounts import button_texts_overlap
+
+        if table_ocr is None:
+            return None, None, None
+        fold_raw = call_raw = raise_raw = None
+        for button in table_ocr.buttons:
+            if button.region_name == "fold_button_region":
+                fold_raw = button.raw_text or None
+            elif button.region_name == "call_button_region":
+                call_raw = button.raw_text or None
+            elif button.region_name == "raise_button_region":
+                raise_raw = button.raw_text or None
+
+        suspects: list[str] = []
+        pairs = (
+            ("fold_button_region", fold_raw),
+            ("call_button_region", call_raw),
+            ("raise_button_region", raise_raw),
+        )
+        for index, (left_name, left_text) in enumerate(pairs):
+            if not left_text:
+                continue
+            for right_name, right_text in pairs[index + 1 :]:
+                if right_text and button_texts_overlap(left_text, right_text):
+                    suspects.append(f"{left_name}~{right_name}")
+        overlap = ",".join(suspects) if suspects else None
+        return fold_raw, raise_raw, overlap
 
     @staticmethod
     def _derive_block_reason(

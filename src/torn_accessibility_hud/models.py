@@ -141,6 +141,10 @@ class TableParseDiagnostics:
     legal_actions_normalized: tuple[str, ...] = ()
     amount_to_call_raw: str | None = None
     amount_to_call_parsed: float | None = None
+    fold_button_raw: str | None = None
+    call_button_raw: str | None = None
+    raise_button_raw: str | None = None
+    button_overlap_suspected: str | None = None
     actions_ambiguous: bool = False
     block_reason: str | None = None
 

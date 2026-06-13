@@ -67,9 +67,10 @@ class ActionValidatorTests(unittest.TestCase):
     def test_bet_when_no_amount_to_call(self) -> None:
         result = validate_action_inputs(
             normalized_labels=("check", "fold", "raise"),
-            raw_entries=("raise_button_region='Raise'",),
+            raw_entries=("raise_button_region='Bet'",),
             actions_ambiguous=False,
             call_button_raw="Check",
+            raise_button_raw="Bet",
             action_regions_scanned=True,
         )
         self.assertIn(RecommendedAction.BET, result.legal_actions)
