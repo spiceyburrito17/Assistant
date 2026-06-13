@@ -6,8 +6,9 @@ import csv
 import re
 import threading
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from .models import GameSnapshot, Recommendation, RecommendedAction, TableParseDiagnostics
 
@@ -36,13 +37,36 @@ CSV_COLUMNS: tuple[str, ...] = (
     "solver_status",
 )
 
-_EVENT_PRIORITY: tuple[str, ...] = (
-    "blocked",
-    "decision",
-    "hero_turn",
-    "street_change",
-    "actions_update",
+
+class SessionDebugEventType(str, Enum):
+    """Stable event_type labels written to debug_current_session.csv."""
+
+    STREET_CHANGE = "street_change"
+    HERO_TURN = "hero_turn"
+    ACTIONS_UPDATE = "actions_update"
+    DECISION = "decision"
+    BLOCKED = "blocked"
+
+
+SESSION_DEBUG_EVENT_PRIORITY: tuple[SessionDebugEventType, ...] = (
+    SessionDebugEventType.STREET_CHANGE,
+    SessionDebugEventType.HERO_TURN,
+    SessionDebugEventType.ACTIONS_UPDATE,
+    SessionDebugEventType.DECISION,
+    SessionDebugEventType.BLOCKED,
 )
+
+SESSION_DEBUG_EVENT_TYPE_LABELS: tuple[str, ...] = tuple(
+    event.value for event in SESSION_DEBUG_EVENT_PRIORITY
+)
+
+
+def format_session_debug_event_types(events: Iterable[SessionDebugEventType]) -> str:
+    """Return pipe-delimited event_type using only stable, ordered labels."""
+
+    event_set = set(events)
+    ordered = [event for event in SESSION_DEBUG_EVENT_PRIORITY if event in event_set]
+    return _join_values([event.value for event in ordered])
 
 
 def _csv_cell(value: Any) -> str:
@@ -104,7 +128,7 @@ class SessionDebugCSVLogger:
 
 
 class SessionDebugEventTracker:
-    """Detect meaningful state transitions and emit one CSV row per event."""
+    """Detect meaningful state transitions and emit one CSV row per update."""
 
     def __init__(self, logger: SessionDebugCSVLogger) -> None:
         self.logger = logger
@@ -126,16 +150,17 @@ class SessionDebugEventTracker:
             return
 
         row = self._build_row(snapshot, recommendation)
-        ordered_events = [event for event in _EVENT_PRIORITY if event in events]
-        for event_type in ordered_events:
-            self.logger.log_debug_state(**row, event_type=event_type)
+        self.logger.log_debug_state(
+            **row,
+            event_type=format_session_debug_event_types(events),
+        )
 
     def _detect_events(
         self,
         snapshot: GameSnapshot,
         recommendation: Recommendation,
-    ) -> set[str]:
-        events: set[str] = set()
+    ) -> set[SessionDebugEventType]:
+        events: set[SessionDebugEventType] = set()
         diag = snapshot.parse_diagnostics
         legal_actions = tuple(action.value for action in snapshot.legal_actions)
         normalized_actions = tuple(diag.legal_actions_normalized) if diag is not None else ()
@@ -148,23 +173,23 @@ class SessionDebugEventTracker:
             self.hand_id += 1
 
         if self._last_street is not None and street != self._last_street:
-            events.add("street_change")
+            events.add(SessionDebugEventType.STREET_CHANGE)
 
         if legal_actions and not self._last_legal_actions:
-            events.add("hero_turn")
+            events.add(SessionDebugEventType.HERO_TURN)
 
         if normalized_actions and normalized_actions != self._last_normalized_actions:
-            events.add("actions_update")
+            events.add(SessionDebugEventType.ACTIONS_UPDATE)
 
         recommendation_action = recommendation.action.value
         if (
             recommendation_action != RecommendedAction.WAIT.value
             and recommendation_action != self._last_recommendation
         ):
-            events.add("decision")
+            events.add(SessionDebugEventType.DECISION)
 
         if block_reason and block_reason != self._last_block_reason:
-            events.add("blocked")
+            events.add(SessionDebugEventType.BLOCKED)
 
         self._last_hero_cards = snapshot.hero_cards
         self._last_street = street
