@@ -65,6 +65,21 @@ class PotParserTests(unittest.TestCase):
         self.assertEqual(result.status, "weak_anchor_and_digits")
         self.assertEqual(result.candidate, "63")
 
+    def test_digit_encoded_pot_anchor_from_restricted_ocr(self) -> None:
+        result = parse_pot_text_detailed("816440")
+        self.assertEqual(result.normalized, 440.0)
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.pot_anchor_match, "816")
+        self.assertEqual(result.pot_anchor_confidence, 0.55)
+        self.assertEqual(result.pot_digits_start, 3)
+        self.assertEqual(result.candidate, "440")
+
+    def test_digit_encoded_anchor_with_short_amount_rejects(self) -> None:
+        result = parse_pot_text_detailed("81663")
+        self.assertIsNone(result.normalized)
+        self.assertEqual(result.status, "weak_anchor_and_digits")
+        self.assertEqual(result.candidate, "63")
+
     def test_no_pot_marker_rejects(self) -> None:
         result = parse_pot_region_text("5660")
         self.assertIsNone(result.normalized)

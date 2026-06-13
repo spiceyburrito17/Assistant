@@ -37,7 +37,7 @@
     "card_stable_reads_required": 3,
     "card_cache_max_missing_scans": 12,
     "pot_ocr_scale": 4.0,
-    "pot_ocr_allowlist": "$0123456789,.",
+    "pot_ocr_allowlist": "POT: $0123456789,.",
     "action_ocr_scale": 3.0,
     "action_ocr_allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "
   },

@@ -55,7 +55,7 @@ class OCRConfig:
     card_ocr_scale: float = 3.0
     card_ocr_allowlist: str = "0123456789AaKkQqJjTtCDHScdhs"
     pot_ocr_scale: float = 4.0
-    pot_ocr_allowlist: str = "$0123456789,."
+    pot_ocr_allowlist: str = "POT: $0123456789,."
     action_ocr_scale: float = 3.0
     action_ocr_allowlist: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "
 
@@ -287,7 +287,7 @@ def write_default_config(path: str | Path) -> Path:
             "card_ocr_scale": 3.0,
             "card_ocr_allowlist": "0123456789AaKkQqJjTtCDHScdhs",
             "pot_ocr_scale": 4.0,
-            "pot_ocr_allowlist": "$0123456789,.",
+            "pot_ocr_allowlist": "POT: $0123456789,.",
             "action_ocr_scale": 3.0,
             "action_ocr_allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",
         },

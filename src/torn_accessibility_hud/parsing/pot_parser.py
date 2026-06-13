@@ -8,6 +8,13 @@ from dataclasses import dataclass
 _POT_TARGET = "POT"
 _PUNCT_AFTER_POT = frozenset(" \t:-.;")
 _MIN_WEAK_DIGITS = 3
+# Per-position OCR confusions when the pot allowlist excludes letters (POT read as 816).
+_POT_OCR_EQUIV: tuple[frozenset[str], ...] = (
+    frozenset("P89"),
+    frozenset("O0Q8D61"),
+    frozenset("T7I1L6F"),
+)
+_OCR_DIGIT_ANCHOR_CONFIDENCE = 0.55
 
 
 @dataclass(frozen=True)
@@ -120,6 +127,16 @@ def _find_pot_anchor(text: str) -> PotAnchorMatch | None:
                     length=3,
                 )
             )
+            continue
+        if _ocr_pot_window_matches(window):
+            candidates.append(
+                PotAnchorMatch(
+                    index=index,
+                    matched=text[index : index + 3],
+                    confidence=_ocr_digit_anchor_confidence(window),
+                    length=3,
+                )
+            )
 
     for match in re.finditer(r"P[\s.\-;]*[O0Q][\s.\-;]*[TI7L1]", upper):
         collapsed = re.sub(r"[\s.\-;]", "", match.group())
@@ -157,6 +174,23 @@ def _edit_distance(left: str, right: str) -> int:
     if len(left) != len(right):
         return max(len(left), len(right))
     return sum(a != b for a, b in zip(left, right, strict=True))
+
+
+def _ocr_pot_window_matches(window: str) -> bool:
+    if len(window) != 3:
+        return False
+    for char, equiv in zip(window.upper(), _POT_OCR_EQUIV, strict=True):
+        if char not in equiv:
+            return False
+    return True
+
+
+def _ocr_digit_anchor_confidence(window: str) -> float:
+    if window.upper() == _POT_TARGET:
+        return 1.0
+    if window.isdigit():
+        return _OCR_DIGIT_ANCHOR_CONFIDENCE
+    return 0.65
 
 
 def _weak_read_reason(anchor_confidence: float, candidate: str) -> str | None:
