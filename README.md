@@ -95,15 +95,22 @@ recognition.
 The current calibrated boxes are hardcoded in `config/regions_calibrated.json`.
 If card OCR misses hero or board cards, rerun `python tools/calibrate_regions.py`
 and redraw `hero_cards_region` and `board_cards_region` tightly around the card
-faces. While `ocr.debug_card_regions` is enabled, the OCR worker also saves raw
-and preprocessed hero/board crops plus OCR text under
-`debug_captures/card_regions/`. Use those images to confirm whether a failure is
-caused by shifted coordinates or by unreadable card glyphs.
-For manual tuning, `config/default_config.json` also supports explicit
+faces. For manual tuning, `config/default_config.json` also supports explicit
 `ocr.hero_cards_region` and `ocr.board_cards_region` overrides. Tune
 `ocr.hero_cards_region` to the bottom-centre player area where your two face-up
 hole cards appear. Hero card capture is not gated by the scrolling-log stable
-frame debounce and uses `ocr.hero_cards_interval_sec` (`0.0` means every tick).
+frame debounce and uses `ocr.hero_cards_interval_sec` (`0.25` by default).
+
+### OCR debug captures (opt-in)
+
+Card OCR runs whenever calibrated hero/board regions are loaded. By default it
+does **not** write debug artifacts to disk. Set `ocr.debug_card_regions` to
+`true` in your config only while calibrating regions or troubleshooting card
+recognition. When enabled, the OCR worker saves raw and preprocessed hero/board
+crops plus OCR text under `debug_captures/card_regions/` (or the path in
+`ocr.debug_card_regions_dir`). Turn the flag off again for normal play to avoid
+filling the disk with screenshots.
+
 The hero folded/greyed guard is disabled because Torn's dark/inverted card theme
 can make live hero cards look visually similar to folded cards.
 Hero/board detection looks for face-up white card rectangles, OCRs only each

@@ -42,7 +42,7 @@ class OCRConfig:
     calibrated_regions_path: str | None = "config/regions_calibrated.json"
     hero_cards_region: ScreenRegion | None = None
     board_cards_region: ScreenRegion | None = None
-    debug_card_regions: bool = True
+    debug_card_regions: bool = False
     debug_card_regions_dir: str = "debug_captures/card_regions"
     debug_card_regions_interval_sec: float = 2.0
     hero_cards_interval_sec: float = 0.25
@@ -242,7 +242,7 @@ def write_default_config(path: str | Path) -> Path:
             "calibrated_regions_path": "config/regions_calibrated.json",
             "hero_cards_region": None,
             "board_cards_region": None,
-            "debug_card_regions": True,
+            "debug_card_regions": False,
             "debug_card_regions_dir": "debug_captures/card_regions",
             "debug_card_regions_interval_sec": 2.0,
             "hero_cards_interval_sec": 0.25,

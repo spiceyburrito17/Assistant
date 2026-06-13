@@ -25,7 +25,7 @@
     "paragraph": false,
     "queue_size": 2,
     "calibrated_regions_path": "config/regions_calibrated.json",
-    "debug_card_regions": true,
+    "debug_card_regions": false,
     "debug_card_regions_dir": "debug_captures/card_regions",
     "debug_card_regions_interval_sec": 2.0,
     "card_ocr_scale": 3.0,

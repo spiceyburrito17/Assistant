@@ -711,7 +711,7 @@ def preprocess_card_region(
 
 
 class CardRegionDebugger:
-    """Capture calibrated hero/board card regions and save OCR diagnostics."""
+    """Read hero/board card regions and optionally save OCR diagnostics to disk."""
 
     REGION_ATTRS = (
         ("hero_cards_region", "Your hand"),
@@ -733,11 +733,15 @@ class CardRegionDebugger:
         self._log_configured_regions()
 
     @property
-    def enabled(self) -> bool:
-        return self.config.debug_card_regions and bool(self.regions)
+    def regions_configured(self) -> bool:
+        return bool(self.regions)
+
+    @property
+    def debug_enabled(self) -> bool:
+        return self.config.debug_card_regions
 
     def write_stability_skip(self, capture: ScreenCapture, frame_id: int, reason: str) -> None:
-        if not self.enabled:
+        if not self.debug_enabled:
             return
         interval = max(self.config.debug_card_regions_interval_sec, 0.1)
         key = "stability_skip"
@@ -767,12 +771,8 @@ class CardRegionDebugger:
         frame_id: int,
     ) -> tuple[OCRLine, ...]:
         debug_log("card_detector called frame=%s", frame_id)
-        if not self.enabled:
-            debug_log(
-                "card_detector disabled: debug_card_regions=%s loaded_regions=%s",
-                self.config.debug_card_regions,
-                sorted(self.regions),
-            )
+        if not self.regions_configured:
+            debug_log("card_detector disabled: no calibrated hero/board regions loaded")
             return ()
         diagnostic_lines: list[OCRLine] = []
         self.hero_cards_scanned = False
@@ -803,13 +803,15 @@ class CardRegionDebugger:
                 self.hero_cards_scanned = True
             else:
                 self.board_cards_scanned = True
-            prefix = self._debug_prefix(region_name, frame_id)
-            header_lines = self._debug_header(frame_id, region_name, raw)
-            self._write_debug_text(prefix, header_lines)
+            prefix = self._debug_prefix(region_name, frame_id) if self.debug_enabled else None
+            header_lines = self._debug_header(frame_id, region_name, raw) if self.debug_enabled else ()
+            if prefix is not None:
+                self._write_debug_text(prefix, header_lines)
             try:
                 if raw.size == 0 or raw.shape[0] == 0 or raw.shape[1] == 0:
-                    zero_lines = (*header_lines, "[detector] SKIPPED - captured region is 0x0 pixels")
-                    self._write_debug_text(prefix, zero_lines)
+                    if prefix is not None:
+                        zero_lines = (*header_lines, "[detector] SKIPPED - captured region is 0x0 pixels")
+                        self._write_debug_text(prefix, zero_lines)
                     debug_log("card_detector skipped frame=%s region=%s: 0x0 crop", frame_id, region_name)
                     continue
                 processed = preprocess_card_region(raw, scale=self.config.card_ocr_scale)
@@ -827,29 +829,34 @@ class CardRegionDebugger:
                 confirmed_cards = None
                 if expected_cards <= len(detected_cards) <= max_cards:
                     confirmed_cards = self._card_stabilizer.observe(region_name, detected_cards)
-                all_debug_lines = (
-                    *header_lines,
-                    f"[preprocess] region_preprocessed size={processed.shape[1]}x{processed.shape[0]} px",
-                    *format_raw_ocr_debug_lines(
-                        f"{region_name}.region_preprocessed",
-                        region_raw_ocr,
-                        allowlist=self.config.card_ocr_allowlist,
-                    ),
-                    *hero_folded_debug_lines,
-                    *debug_lines_for_file,
-                    f"[detected_cards] {' '.join(detected_cards) if detected_cards else '<none>'}",
-                    f"[stable_cards] published={' '.join(confirmed_cards) if confirmed_cards else '<held>'}",
-                )
+                if self.debug_enabled:
+                    all_debug_lines = (
+                        *header_lines,
+                        f"[preprocess] region_preprocessed size={processed.shape[1]}x{processed.shape[0]} px",
+                        *format_raw_ocr_debug_lines(
+                            f"{region_name}.region_preprocessed",
+                            region_raw_ocr,
+                            allowlist=self.config.card_ocr_allowlist,
+                        ),
+                        *hero_folded_debug_lines,
+                        *debug_lines_for_file,
+                        f"[detected_cards] {' '.join(detected_cards) if detected_cards else '<none>'}",
+                        f"[stable_cards] published={' '.join(confirmed_cards) if confirmed_cards else '<held>'}",
+                    )
+                else:
+                    all_debug_lines = ()
                 if confirmed_cards is not None:
                     diagnostic_text = " ".join(confirmed_cards)
                     diagnostic_lines.append(
                         OCRLine(text=f"{label}: {diagnostic_text}", confidence=1.0)
                     )
-                self._save_debug_images(prefix, raw, processed, all_debug_lines)
-            except Exception as exc:  # noqa: BLE001 - debug logging must survive detector failures
-                error_lines = (*header_lines, f"[error] {type(exc).__name__}: {exc}")
-                self._write_debug_text(prefix, error_lines)
-                self.last_error = f"{region_name} card debug failed: {type(exc).__name__}: {exc}"
+                if prefix is not None:
+                    self._save_debug_images(prefix, raw, processed, all_debug_lines)
+            except Exception as exc:  # noqa: BLE001 - card detection must survive detector failures
+                if prefix is not None:
+                    error_lines = (*header_lines, f"[error] {type(exc).__name__}: {exc}")
+                    self._write_debug_text(prefix, error_lines)
+                self.last_error = f"{region_name} card detection failed: {type(exc).__name__}: {exc}"
                 continue
             self.last_saved_at[region_name] = time.monotonic()
         return tuple(diagnostic_lines)
@@ -860,6 +867,7 @@ class CardRegionDebugger:
         return max(self.config.debug_card_regions_interval_sec, 0.1)
 
     def _debug_prefix(self, region_name: str, frame_id: int) -> Path:
+        assert self.debug_enabled
         self.output_dir.mkdir(parents=True, exist_ok=True)
         return self.output_dir / f"frame_{frame_id:06d}_{region_name}"
 
@@ -887,6 +895,8 @@ class CardRegionDebugger:
         processed: np.ndarray[Any, Any],
         debug_lines: tuple[str, ...],
     ) -> None:
+        if not self.debug_enabled:
+            return
         import cv2
 
         cv2.imwrite(str(prefix.with_name(f"{prefix.name}_raw.png")), raw)
@@ -894,11 +904,15 @@ class CardRegionDebugger:
         self._write_debug_text(prefix, debug_lines)
 
     def _save_raw_debug_image(self, prefix: Path, raw: np.ndarray[Any, Any]) -> None:
+        if not self.debug_enabled:
+            return
         import cv2
 
         cv2.imwrite(str(prefix.with_name(f"{prefix.name}_raw.png")), raw)
 
     def _write_debug_text(self, prefix: Path, debug_lines: tuple[str, ...]) -> None:
+        if not self.debug_enabled:
+            return
         with prefix.with_name(f"{prefix.name}_ocr.txt").open("w", encoding="utf-8") as fp:
             for line in debug_lines:
                 fp.write(f"{line}\n")

@@ -48,6 +48,7 @@ class CardImageDetectionTests(unittest.TestCase):
             debugger = CardRegionDebugger(
                 OCRConfig(
                     calibrated_regions_path=None,
+                    debug_card_regions=True,
                     debug_card_regions_dir=temp_dir,
                 )
             )
@@ -64,6 +65,23 @@ class CardImageDetectionTests(unittest.TestCase):
         self.assertIn("hero captured crop size: 140x100 px", content[1])
         self.assertIn("hero region size: 140x100 px", content[2])
         self.assertIn("board region size: 386x99 px", content[3])
+
+    def test_card_debug_writes_are_skipped_when_debug_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            debugger = CardRegionDebugger(
+                OCRConfig(
+                    calibrated_regions_path=None,
+                    debug_card_regions=False,
+                    debug_card_regions_dir=temp_dir,
+                )
+            )
+            self.assertTrue(debugger.regions_configured is False)
+            self.assertFalse(debugger.debug_enabled)
+            prefix = Path(temp_dir) / "frame_000001_hero_cards_region"
+            raw = np.zeros((10, 10, 3), dtype=np.uint8)
+            debugger._write_debug_text(prefix, ("line",))
+            debugger._save_raw_debug_image(prefix, raw)
+            self.assertFalse(list(Path(temp_dir).iterdir()))
 
     def test_card_debugger_uses_explicit_hero_region_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
