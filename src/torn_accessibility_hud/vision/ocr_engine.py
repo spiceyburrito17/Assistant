@@ -96,23 +96,81 @@ def format_raw_ocr_debug_lines(label: str, lines: tuple[OCRLine, ...], allowlist
 def detect_suit_from_card_image(card_bgr: np.ndarray[Any, Any]) -> str | None:
     """Infer suit from the dominant colored suit glyph in a card face crop."""
 
+    suit, _debug_lines = detect_suit_from_card_image_with_debug(card_bgr)
+    return suit
+
+
+def detect_suit_from_card_image_with_debug(card_bgr: np.ndarray[Any, Any]) -> tuple[str | None, tuple[str, ...]]:
+    """Infer suit and report dominant color data for dark-theme tuning."""
+
     import cv2
 
     if card_bgr.size == 0:
-        return None
+        return None, ("[suit color] SKIPPED - empty crop",)
     sample = card_bgr[: max(1, int(card_bgr.shape[0] * 0.45)), : max(1, int(card_bgr.shape[1] * 0.45))]
     hsv = cv2.cvtColor(sample, cv2.COLOR_BGR2HSV)
+    bgr_mean = tuple(float(value) for value in np.mean(sample.reshape(-1, 3), axis=0))
+    hsv_mean = tuple(float(value) for value in np.mean(hsv.reshape(-1, 3), axis=0))
+    dominant_bgr, dominant_hsv, dominant_count = _dominant_non_background_color(sample)
     masks = {
-        "h": cv2.inRange(hsv, (0, 70, 50), (12, 255, 255)) | cv2.inRange(hsv, (170, 70, 50), (180, 255, 255)),
-        "d": cv2.inRange(hsv, (90, 70, 50), (130, 255, 255)),
-        "c": cv2.inRange(hsv, (35, 45, 40), (85, 255, 255)),
+        # Hearts stay red in Torn's card themes.
+        "h": cv2.inRange(hsv, (0, 55, 45), (14, 255, 255)) | cv2.inRange(hsv, (168, 55, 45), (180, 255, 255)),
+        # Diamonds are usually blue in four-color decks, but may appear red/yellow.
+        "d": (
+            cv2.inRange(hsv, (85, 45, 45), (135, 255, 255))
+            | cv2.inRange(hsv, (15, 45, 80), (35, 255, 255))
+        ),
+        # Clubs are green, sometimes very light in dark mode.
+        "c": cv2.inRange(hsv, (35, 35, 40), (90, 255, 255)),
     }
     scores = {suit: int(mask.sum() // 255) for suit, mask in masks.items()}
     gray = cv2.cvtColor(sample, cv2.COLOR_BGR2GRAY)
-    dark_score = int(cv2.inRange(gray, 0, 90).sum() // 255)
-    scores["s"] = dark_score
+    # Spades are black in light mode, but white/light-grey in Torn dark mode.
+    dark_score = int(cv2.inRange(gray, 0, 95).sum() // 255)
+    light_neutral_mask = cv2.inRange(hsv, (0, 0, 145), (180, 80, 255))
+    light_neutral_score = int(light_neutral_mask.sum() // 255)
+    scores["s"] = max(dark_score, light_neutral_score)
     best_suit, best_score = max(scores.items(), key=lambda item: item[1])
-    return best_suit if best_score >= 8 else None
+    debug_lines = [
+        "[suit color] "
+        f"sample_size={sample.shape[1]}x{sample.shape[0]} "
+        f"mean_bgr=({bgr_mean[0]:.1f},{bgr_mean[1]:.1f},{bgr_mean[2]:.1f}) "
+        f"mean_hsv=({hsv_mean[0]:.1f},{hsv_mean[1]:.1f},{hsv_mean[2]:.1f})",
+        "[suit color] "
+        f"dominant_bgr=({dominant_bgr[0]},{dominant_bgr[1]},{dominant_bgr[2]}) "
+        f"dominant_hsv=({dominant_hsv[0]},{dominant_hsv[1]},{dominant_hsv[2]}) "
+        f"dominant_count={dominant_count}",
+        "[suit color] "
+        f"scores hearts={scores['h']} diamonds={scores['d']} clubs={scores['c']} "
+        f"spades={scores['s']} dark_spade={dark_score} light_spade={light_neutral_score}",
+    ]
+    if best_score >= 8:
+        debug_lines.append(f"[suit color] matched suit={best_suit} score={best_score}")
+        return best_suit, tuple(debug_lines)
+    debug_lines.append(f"[suit color] FAILED - best_suit={best_suit} best_score={best_score} threshold=8")
+    return None, tuple(debug_lines)
+
+
+def _dominant_non_background_color(sample_bgr: np.ndarray[Any, Any]) -> tuple[tuple[int, int, int], tuple[int, int, int], int]:
+    import cv2
+
+    if sample_bgr.size == 0:
+        return (0, 0, 0), (0, 0, 0), 0
+    hsv = cv2.cvtColor(sample_bgr, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+    gray = cv2.cvtColor(sample_bgr, cv2.COLOR_BGR2GRAY)
+    foreground = (saturation > 30) | (value < 105) | ((value > 145) & (saturation < 85))
+    if not np.any(foreground):
+        foreground = np.ones(sample_bgr.shape[:2], dtype=bool)
+    pixels = sample_bgr[foreground]
+    quantized = (pixels // 16) * 16
+    colors, counts = np.unique(quantized.reshape(-1, 3), axis=0, return_counts=True)
+    best_index = int(np.argmax(counts))
+    dominant_bgr = tuple(int(value) for value in colors[best_index])
+    dominant_hsv_raw = cv2.cvtColor(np.uint8([[dominant_bgr]]), cv2.COLOR_BGR2HSV)[0, 0]
+    dominant_hsv = tuple(int(value) for value in dominant_hsv_raw)
+    return dominant_bgr, dominant_hsv, int(counts[best_index])
 
 
 def detect_suit_near_rank_bbox(
@@ -144,7 +202,8 @@ def detect_suit_near_rank_bbox(
         if roi.size == 0:
             debug_lines.append(f"[bbox fallback] suit_roi {label} SKIPPED - empty after clipping")
             continue
-        suit = detect_suit_from_card_image(roi)
+        suit, suit_debug_lines = detect_suit_from_card_image_with_debug(roi)
+        debug_lines.extend(f"[bbox fallback] suit_roi {label} {entry}" for entry in suit_debug_lines)
         debug_lines.append(f"[bbox fallback] suit_roi {label} result={suit or 'None'}")
         if suit is not None:
             return suit, tuple(debug_lines)
@@ -400,7 +459,9 @@ def _preprocess_rank_light(frame: np.ndarray[Any, Any], scale: float) -> np.ndar
 
     resized = cv2.resize(frame, None, fx=max(scale, 1.0), fy=max(scale, 1.0), interpolation=cv2.INTER_CUBIC)
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-    _threshold, binary = cv2.threshold(gray, 145, 255, cv2.THRESH_BINARY)
+    clahe = cv2.createCLAHE(clipLimit=1.8, tileGridSize=(4, 4)).apply(gray)
+    blurred = cv2.GaussianBlur(clahe, (3, 3), 0)
+    _threshold, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
     return cv2.cvtColor(_ensure_dark_text_on_light(binary), cv2.COLOR_GRAY2BGR)
 
 
@@ -447,7 +508,8 @@ def detect_cards_from_region(
             crop_label=f"card_{crop_index}",
         )
         debug_lines.extend(rank_debug_lines)
-        suit = detect_suit_from_card_image(crop)
+        suit, suit_debug_lines = detect_suit_from_card_image_with_debug(crop)
+        debug_lines.extend(f"[card_{crop_index}] {entry}" for entry in suit_debug_lines)
         debug_lines.append(f"[card_{crop_index}.result] rank={rank or 'None'} suit={suit or 'None'}")
         if rank is None or suit is None:
             continue
@@ -512,12 +574,12 @@ def preprocess_card_region(
     frame: np.ndarray[Any, Any],
     scale: float = 3.0,
 ) -> np.ndarray[Any, np.dtype[np.uint8]]:
-    """Prepare card-image crops for OCR.
+    """Prepare card-image crops for OCR without crushing dark-theme shadows.
 
-    Poker cards are rendered as small images, not plain text. Upscaling,
-    grayscale conversion, local contrast enhancement, and adaptive thresholding
-    make ranks/suit glyphs stand out from textured table backgrounds before
-    EasyOCR sees the crop.
+    EasyOCR tends to prefer dark glyphs on light backgrounds. Dark-mode Torn
+    cards often render light text with subtle shadows, so hard binary
+    thresholding can erase the right card's rank. This path keeps grayscale
+    detail, boosts local contrast with CLAHE, and only inverts when needed.
     """
 
     import cv2
@@ -527,19 +589,12 @@ def preprocess_card_region(
     scale = max(scale, 1.0)
     resized = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-    denoised = cv2.bilateralFilter(gray, d=5, sigmaColor=45, sigmaSpace=45)
-    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(denoised)
-    thresholded = cv2.adaptiveThreshold(
-        clahe,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        31,
-        5,
-    )
-    sharpen_kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
-    sharpened = cv2.filter2D(thresholded, -1, sharpen_kernel)
-    return cv2.cvtColor(_ensure_dark_text_on_light(sharpened), cv2.COLOR_GRAY2BGR)
+    denoised = cv2.bilateralFilter(gray, d=5, sigmaColor=35, sigmaSpace=35)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(denoised)
+    normalized = _ensure_dark_text_on_light(clahe)
+    sharpen_kernel = np.array([[0, -0.35, 0], [-0.35, 2.4, -0.35], [0, -0.35, 0]], dtype=np.float32)
+    sharpened = cv2.filter2D(normalized, -1, sharpen_kernel)
+    return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
 
 
 class CardRegionDebugger:

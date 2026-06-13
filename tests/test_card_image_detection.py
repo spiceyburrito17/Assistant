@@ -12,6 +12,7 @@ from torn_accessibility_hud.vision.ocr_engine import (
     CardRegionDebugger,
     detect_cards_from_ocr_bboxes,
     detect_suit_from_card_image,
+    detect_suit_from_card_image_with_debug,
     detect_suit_near_rank_bbox,
     format_raw_ocr_debug_lines,
     is_probably_card_back,
@@ -119,6 +120,15 @@ class CardImageDetectionTests(unittest.TestCase):
         self.assertEqual(detect_suit_from_card_image(self._card_with_glyph((210, 80, 0))), "d")
         self.assertEqual(detect_suit_from_card_image(self._card_with_glyph((0, 160, 0))), "c")
         self.assertEqual(detect_suit_from_card_image(self._card_with_glyph((20, 20, 20))), "s")
+        self.assertEqual(detect_suit_from_card_image(self._card_with_glyph((210, 210, 210))), "s")
+
+    @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
+    def test_suit_debug_logs_dominant_color_when_detection_fails(self) -> None:
+        suit, debug_lines = detect_suit_from_card_image_with_debug(np.full((60, 40, 3), 115, dtype=np.uint8))
+        self.assertIsNone(suit)
+        self.assertTrue(any("dominant_bgr" in line for line in debug_lines))
+        self.assertTrue(any("scores hearts=" in line for line in debug_lines))
+        self.assertTrue(any("FAILED" in line for line in debug_lines))
 
     @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
     def test_card_back_and_folded_hero_guards(self) -> None:
