@@ -181,14 +181,18 @@ class TkOverlay:
                 f"pot_digits_start={parse_diag.pot_digits_start if parse_diag.pot_digits_start is not None else '--'}"
             )
             summary_lines.append(f"pot_candidate={parse_diag.pot_candidate or '--'}")
+            live_pot = (
+                f"{parse_diag.pot_parsed:,.0f}"
+                if parse_diag.pot_parsed is not None
+                else "--"
+            )
+            summary_lines.append(f"pot_live_parse={live_pot}")
             parsed_pot = (
                 f"{parse_diag.pot_normalized:,.0f}"
                 if parse_diag.pot_normalized is not None
-                else (
-                    f"{parse_diag.pot_parsed:,.0f}" if parse_diag.pot_parsed is not None else "--"
-                )
+                else "--"
             )
-            summary_lines.append(f"pot_normalized={parsed_pot}")
+            summary_lines.append(f"pot_trusted={parsed_pot}")
             if parse_diag.pot_rejected_reason:
                 summary_lines.append(f"pot_rejected_reason={parse_diag.pot_rejected_reason}")
             summary_lines.append(
@@ -198,6 +202,13 @@ class TkOverlay:
                 "legal_actions_normalized=["
                 f"{', '.join(parse_diag.legal_actions_normalized) or '--'}]"
             )
+            summary_lines.append(f"amount_to_call_raw={parse_diag.amount_to_call_raw or '--'}")
+            parsed_to_call = (
+                f"{parse_diag.amount_to_call_parsed:,.0f}"
+                if parse_diag.amount_to_call_parsed is not None
+                else "--"
+            )
+            summary_lines.append(f"amount_to_call_parsed={parsed_to_call}")
             if parse_diag.block_reason:
                 summary_lines.append(f"block_reason={parse_diag.block_reason}")
         debug_lines = [

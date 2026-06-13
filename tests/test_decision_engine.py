@@ -101,7 +101,7 @@ class DecisionEngineTests(unittest.TestCase):
             solver_status=SolverStatus.OK,
         )
         self.assertEqual(advice.action, RecommendedAction.WAIT)
-        self.assertEqual(advice.decision_blocked_reason, "pot unreadable")
+        self.assertEqual(advice.decision_blocked_reason, "pot_unreadable")
 
     def test_solver_timeout_blocks_action(self) -> None:
         snapshot = _trusted_snapshot()

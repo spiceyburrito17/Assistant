@@ -100,7 +100,10 @@ class DecisionEngine:
                 confidence_notes=confidence_notes,
             )
 
-        raise_sizing = self._raise_sizing(snapshot) if action is RecommendedAction.RAISE else None
+        raise_sizing = self._raise_sizing(snapshot) if action in {
+            RecommendedAction.RAISE,
+            RecommendedAction.BET,
+        } else None
         level = self._level_for_action(action, edge, confidence)
         title = self._title_for_action(action)
         detail = self._detail_for_action(
@@ -237,7 +240,11 @@ class DecisionEngine:
                 return RecommendedAction.CHECK
             return RecommendedAction.FOLD
         if edge > thresholds.raise_edge and self._supports_aggression(snapshot, inputs.hero_equity):
-            return RecommendedAction.RAISE
+            if RecommendedAction.RAISE in snapshot.legal_actions:
+                return RecommendedAction.RAISE
+            if RecommendedAction.BET in snapshot.legal_actions:
+                return RecommendedAction.BET
+            return RecommendedAction.CHECK if snapshot.to_call <= 0 else RecommendedAction.CALL
         if snapshot.to_call <= 0:
             return RecommendedAction.CHECK
         return RecommendedAction.CALL

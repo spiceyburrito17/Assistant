@@ -57,7 +57,7 @@ class TableRegionReader:
         action_scanned = False
 
         pot_region = self.regions.get(self.POT_REGION)
-        if pot_region is not None and self._should_process(self.POT_REGION):
+        if pot_region is not None:
             pot_scanned = True
             pot_result = self._read_pot_region(capture, ocr, frame_id, pot_region)
 
@@ -197,7 +197,14 @@ class TableRegionReader:
         )
 
     def _should_process(self, region_name: str) -> bool:
-        interval = max(self.config.debug_table_regions_interval_sec, 0.1)
+        if region_name == self.POT_REGION:
+            interval = max(self.config.pot_ocr_interval_sec, 0.0)
+        elif region_name.endswith(self.BUTTON_REGION_SUFFIX):
+            interval = max(self.config.action_ocr_interval_sec, 0.0)
+        else:
+            interval = max(self.config.debug_table_regions_interval_sec, 0.1)
+        if interval <= 0:
+            return True
         return time.monotonic() - self.last_saved_at.get(region_name, 0.0) >= interval
 
     def _debug_prefix(self, region_name: str, frame_id: int) -> Path:

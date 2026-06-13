@@ -17,7 +17,8 @@ from .models import (
     TableParseDiagnostics,
     TableStateConfidence,
 )
-from .parsing.amounts import parse_to_call_from_button_text
+from .parsing.action_validator import validate_action_inputs
+from .parsing.amounts import parse_amount_to_call_from_action_text
 from .parsing.pot_sanity import validate_pot_update
 from .parsing.legal_actions import (
     allowed_labels_for_region,
@@ -63,6 +64,9 @@ class CardReadStabilizer:
 
     def published(self, region: str) -> tuple[str, ...]:
         return self._published.get(region, ())
+
+    def is_confirmed(self, region: str, *, minimum_cards: int) -> bool:
+        return len(self._published.get(region, ())) >= minimum_cards
 
 
 class StickyCardCache:
@@ -226,6 +230,8 @@ class TrustedTableStateManager:
         *,
         hero_cards_scanned: bool = False,
         board_cards_scanned: bool = False,
+        hero_cards_stable: bool = True,
+        board_cards_stable: bool = True,
         hero_region_folded: bool = False,
         table_ocr: TableOCRResult | None = None,
     ) -> tuple[TrustedTableState, GameSnapshot]:
@@ -295,28 +301,18 @@ class TrustedTableStateManager:
         pot_anchor_confidence: float | None = None
         pot_digits_start: int | None = None
         pot_candidate: str | None = None
+        pot_live_parsed: float | None = None
         pot_normalized: float | None = pot_size
         pot_rejected_reason: str | None = None
         previous_pot = self._trusted.pot_size
-
-        for event in events:
-            if event.action is not ActionType.POT or event.amount is None:
-                continue
-            if event.raw_text.lower().startswith("to_call"):
-                to_call = max(0.0, event.amount)
-            elif event.amount > 0 and pot_size is None:
-                accepted, reject_reason = validate_pot_update(
-                    event.amount,
-                    previous=previous_pot if not hand_reset else None,
-                    hand_reset=hand_reset,
-                )
-                if accepted is not None:
-                    pot_size = accepted
-                    pot_normalized = accepted
-                else:
-                    pot_rejected_reason = reject_reason
-                    pot_size = previous_pot if not hand_reset else None
-                    pot_normalized = pot_size
+        prev_diag = self._trusted.parse_diagnostics
+        if prev_diag is not None:
+            pot_crop_text = prev_diag.pot_crop_text or pot_crop_text
+            pot_anchor_index = prev_diag.pot_anchor_index
+            pot_anchor_match = prev_diag.pot_anchor_match
+            pot_anchor_confidence = prev_diag.pot_anchor_confidence
+            pot_digits_start = prev_diag.pot_digits_start
+            pot_candidate = prev_diag.pot_candidate
 
         if table_ocr is not None and table_ocr.pot is not None:
             pot_raw = table_ocr.pot.raw_text or pot_raw
@@ -327,10 +323,15 @@ class TrustedTableStateManager:
             pot_anchor_confidence = table_ocr.pot.pot_anchor_confidence
             pot_digits_start = table_ocr.pot.pot_digits_start
             if table_ocr.pot.parsed_amount is not None and table_ocr.pot.parsed_amount > 0:
+                pot_live_parsed = table_ocr.pot.parsed_amount
+                from_table_region = (
+                    table_ocr.pot_region_scanned and table_ocr.pot.parse_status == "ok"
+                )
                 accepted, reject_reason = validate_pot_update(
                     table_ocr.pot.parsed_amount,
                     previous=previous_pot if not hand_reset else None,
                     hand_reset=hand_reset,
+                    from_table_region=from_table_region,
                 )
                 if accepted is not None:
                     pot_size = accepted
@@ -355,29 +356,75 @@ class TrustedTableStateManager:
             elif table_ocr.pot_region_scanned and not table_ocr.pot.raw_text:
                 debug_log("[TRUST] pot region scanned but empty OCR")
 
+        for event in events:
+            if event.action is not ActionType.POT or event.amount is None:
+                continue
+            if event.raw_text.lower().startswith("to_call"):
+                to_call = max(0.0, event.amount)
+            elif event.amount > 0 and pot_size is None:
+                accepted, reject_reason = validate_pot_update(
+                    event.amount,
+                    previous=previous_pot if not hand_reset else None,
+                    hand_reset=hand_reset,
+                )
+                if accepted is not None:
+                    pot_size = accepted
+                    pot_normalized = accepted
+                else:
+                    pot_rejected_reason = reject_reason
+                    pot_size = previous_pot if not hand_reset else None
+                    pot_normalized = pot_size
+
         legal_actions, legal_actions_raw, legal_actions_normalized, actions_ambiguous = (
             self._resolve_legal_actions(table_ocr, ocr_lines)
         )
-        if legal_actions:
+        amount_to_call_raw: str | None = None
+        amount_to_call_parsed: float | None = None
+        action_block_reason: str | None = None
+        call_button_raw = self._call_button_raw_text(table_ocr)
+        if table_ocr is not None and table_ocr.action_regions_scanned:
+            validated = validate_action_inputs(
+                normalized_labels=legal_actions_normalized,
+                raw_entries=legal_actions_raw,
+                actions_ambiguous=actions_ambiguous,
+                call_button_raw=call_button_raw,
+                action_regions_scanned=True,
+            )
+            legal_actions = validated.legal_actions
+            legal_actions_normalized = validated.normalized_labels
+            actions_ambiguous = validated.actions_ambiguous
+            amount_to_call_raw = validated.amount_to_call.raw_text
+            amount_to_call_parsed = validated.amount_to_call.parsed
+            action_block_reason = validated.block_reason
+            if validated.to_call is not None:
+                to_call = validated.to_call
+            elif RecommendedAction.CHECK in legal_actions and RecommendedAction.CALL not in legal_actions:
+                to_call = 0.0
+        elif legal_actions:
             self._legal_actions_seen_at = now
         elif self._legal_actions_seen_at > 0.0 and now - self._legal_actions_seen_at <= self.legal_actions_grace_sec:
             legal_actions = self._trusted.legal_actions
             if self._trusted.parse_diagnostics is not None:
                 legal_actions_raw = self._trusted.parse_diagnostics.legal_actions_raw
                 legal_actions_normalized = self._trusted.parse_diagnostics.legal_actions_normalized
+                amount_to_call_raw = self._trusted.parse_diagnostics.amount_to_call_raw
+                amount_to_call_parsed = self._trusted.parse_diagnostics.amount_to_call_parsed
             actions_ambiguous = self._trusted.actions_ambiguous
+            if self._trusted.to_call is not None:
+                to_call = self._trusted.to_call
         else:
             legal_actions = ()
             legal_actions_raw = ()
             legal_actions_normalized = ()
 
-        if table_ocr is not None:
-            for button in table_ocr.buttons:
-                if button.region_name != "call_button_region" or not button.raw_text:
-                    continue
-                call_amount = parse_to_call_from_button_text(button.raw_text)
-                if call_amount is not None and call_amount > 0:
-                    to_call = call_amount
+        if legal_actions and table_ocr is not None and table_ocr.action_regions_scanned:
+            self._legal_actions_seen_at = now
+
+        if table_ocr is None or not table_ocr.action_regions_scanned:
+            if raw.to_call > 0 and to_call is None:
+                to_call = raw.to_call
+            elif to_call is None and RecommendedAction.CHECK in legal_actions:
+                to_call = 0.0
 
         if raw.pot_size > 0 and pot_size is None and pot_rejected_reason is None:
             accepted, reject_reason = validate_pot_update(
@@ -392,16 +439,15 @@ class TrustedTableStateManager:
                 pot_rejected_reason = reject_reason
                 pot_size = previous_pot if not hand_reset else None
                 pot_normalized = pot_size
-        if raw.to_call > 0:
+
+        if (table_ocr is None or not table_ocr.action_regions_scanned) and raw.to_call > 0:
             to_call = raw.to_call
-        elif any(
+        elif (table_ocr is None or not table_ocr.action_regions_scanned) and any(
             event.action is ActionType.POT and event.raw_text.lower().startswith("to_call")
             for event in events
         ):
             to_call = max(0.0, raw.to_call)
-        elif to_call is None and raw.to_call == 0 and (
-            RecommendedAction.CHECK in legal_actions or RecommendedAction.CALL in legal_actions
-        ):
+        elif to_call is None and RecommendedAction.CHECK in legal_actions:
             to_call = 0.0
 
         if board_cards:
@@ -417,6 +463,10 @@ class TrustedTableStateManager:
             street=street,
             legal_actions=legal_actions,
             actions_ambiguous=actions_ambiguous,
+            hero_cards_stable=hero_cards_stable,
+            board_cards_stable=board_cards_stable,
+            hero_cards_scanned=hero_cards_scanned,
+            board_cards_scanned=board_cards_scanned,
         )
         block_reason = self._derive_block_reason(
             hero_cards=hero_cards,
@@ -425,6 +475,11 @@ class TrustedTableStateManager:
             pot_size=pot_size,
             legal_actions=legal_actions,
             actions_ambiguous=actions_ambiguous,
+            action_block_reason=action_block_reason,
+            hero_cards_stable=hero_cards_stable,
+            board_cards_stable=board_cards_stable,
+            hero_cards_scanned=hero_cards_scanned,
+            board_cards_scanned=board_cards_scanned,
             notes=notes,
         )
         parse_diagnostics = TableParseDiagnostics(
@@ -435,11 +490,13 @@ class TrustedTableStateManager:
             pot_anchor_confidence=pot_anchor_confidence,
             pot_digits_start=pot_digits_start,
             pot_candidate=pot_candidate,
-            pot_parsed=pot_normalized if pot_normalized and pot_normalized > 0 else None,
+            pot_parsed=pot_live_parsed if pot_live_parsed and pot_live_parsed > 0 else None,
             pot_normalized=pot_normalized if pot_normalized and pot_normalized > 0 else None,
             pot_rejected_reason=pot_rejected_reason,
             legal_actions_raw=legal_actions_raw,
             legal_actions_normalized=legal_actions_normalized,
+            amount_to_call_raw=amount_to_call_raw,
+            amount_to_call_parsed=amount_to_call_parsed,
             actions_ambiguous=actions_ambiguous,
             block_reason=block_reason,
         )
@@ -500,6 +557,15 @@ class TrustedTableStateManager:
         return tuple(merged), tuple(raw_texts), tuple(normalized), ambiguous
 
     @staticmethod
+    def _call_button_raw_text(table_ocr: TableOCRResult | None) -> str | None:
+        if table_ocr is None:
+            return None
+        for button in table_ocr.buttons:
+            if button.region_name == "call_button_region" and button.raw_text:
+                return button.raw_text
+        return None
+
+    @staticmethod
     def _derive_block_reason(
         hero_cards: tuple[str, ...],
         board_cards: tuple[str, ...],
@@ -507,20 +573,32 @@ class TrustedTableStateManager:
         pot_size: float | None,
         legal_actions: tuple[RecommendedAction, ...],
         actions_ambiguous: bool,
+        action_block_reason: str | None,
+        hero_cards_stable: bool,
+        board_cards_stable: bool,
+        hero_cards_scanned: bool,
+        board_cards_scanned: bool,
         notes: tuple[str, ...],
     ) -> str | None:
+        if hero_cards_scanned and not hero_cards_stable:
+            return "hero_cards_unstable"
         if len(hero_cards) != 2:
-            return "hero cards missing"
+            return "hero_cards_unstable"
+        if board_cards_scanned and not board_cards_stable and street is not Street.PREFLOP:
+            return "board_unstable"
         if street is not Street.PREFLOP and len(board_cards) < 3:
-            return "board cards missing for street"
+            return "board_unstable"
         if pot_size is None or pot_size <= 0:
-            return "pot unreadable"
+            return "pot_unreadable"
         if actions_ambiguous:
-            return "actions ambiguous"
+            return "actions_ambiguous"
+        if action_block_reason:
+            return action_block_reason
         if not legal_actions:
-            return "legal actions missing"
-        if notes:
-            return notes[0]
+            return "legal_actions_missing"
+        for note in notes:
+            if note in {"amount_to_call_unreadable", "call amount missing"}:
+                return "amount_to_call_unreadable"
         return None
 
     @staticmethod
@@ -542,20 +620,28 @@ class TrustedTableStateManager:
         street: Street,
         legal_actions: tuple[RecommendedAction, ...],
         actions_ambiguous: bool,
+        hero_cards_stable: bool,
+        board_cards_stable: bool,
+        hero_cards_scanned: bool,
+        board_cards_scanned: bool,
     ) -> tuple[TableStateConfidence, tuple[str, ...]]:
         notes: list[str] = []
-        if len(hero_cards) != 2:
-            notes.append("hero cards missing")
-        if street is not Street.PREFLOP and len(board_cards) < 3:
-            notes.append("board cards missing for street")
+        if hero_cards_scanned and not hero_cards_stable:
+            notes.append("hero_cards_unstable")
+        elif len(hero_cards) != 2:
+            notes.append("hero_cards_unstable")
+        if board_cards_scanned and not board_cards_stable and street is not Street.PREFLOP:
+            notes.append("board_unstable")
+        elif street is not Street.PREFLOP and len(board_cards) < 3:
+            notes.append("board_unstable")
         if pot_size is None or pot_size <= 0:
-            notes.append("pot unreadable")
+            notes.append("pot_unreadable")
         if actions_ambiguous:
-            notes.append("actions ambiguous")
+            notes.append("actions_ambiguous")
         if not legal_actions:
-            notes.append("legal actions missing")
-        if to_call is None:
-            notes.append("call amount missing")
+            notes.append("legal_actions_missing")
+        if RecommendedAction.CALL in legal_actions and to_call is None:
+            notes.append("amount_to_call_unreadable")
         if notes:
             return TableStateConfidence.LOW, tuple(notes)
         return TableStateConfidence.HIGH, ()

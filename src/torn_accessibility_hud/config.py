@@ -18,7 +18,7 @@ class CaptureConfig:
     # Once tools/calibrate_regions.py has produced config/regions_calibrated.json,
     # copy its log_region here to keep the existing OCR capture pipeline intact.
     region: ScreenRegion = ScreenRegion(left=0, top=0, width=1280, height=720)
-    fps_limit: float = 12.0
+    fps_limit: float = 15.0
 
 
 @dataclass(frozen=True)
@@ -56,8 +56,10 @@ class OCRConfig:
     card_ocr_allowlist: str = "0123456789AaKkQqJjTtCDHScdhs"
     pot_ocr_scale: float = 4.0
     pot_ocr_allowlist: str = "POT: $0123456789,."
+    pot_ocr_interval_sec: float = 0.0
     action_ocr_scale: float = 3.0
     action_ocr_allowlist: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "
+    action_ocr_interval_sec: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -254,7 +256,7 @@ def write_default_config(path: str | Path) -> Path:
         "capture": {
             "monitor_index": 1,
             "region": {"left": 0, "top": 0, "width": 1280, "height": 720},
-            "fps_limit": 12.0,
+            "fps_limit": 15.0,
         },
         "debounce": {
             "stable_frames_required": 3,
@@ -288,8 +290,10 @@ def write_default_config(path: str | Path) -> Path:
             "card_ocr_allowlist": "0123456789AaKkQqJjTtCDHScdhs",
             "pot_ocr_scale": 4.0,
             "pot_ocr_allowlist": "POT: $0123456789,.",
+            "pot_ocr_interval_sec": 0.0,
             "action_ocr_scale": 3.0,
             "action_ocr_allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",
+            "action_ocr_interval_sec": 0.0,
         },
         "parser": {
             "max_reasonable_amount": 10000000.0,

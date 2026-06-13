@@ -154,6 +154,8 @@ class CoordinatorWorker(threading.Thread):
             hero_region_folded=latest.hero_region_folded,
             hero_cards_scanned=latest.hero_cards_scanned,
             board_cards_scanned=latest.board_cards_scanned,
+            hero_cards_stable=latest.hero_cards_stable,
+            board_cards_stable=latest.board_cards_stable,
             table_ocr=latest.table_ocr,
         )
         if snapshot != self.builder.snapshot:
@@ -215,6 +217,12 @@ class CoordinatorWorker(threading.Thread):
                 diagnostics["pot_rejected_reason"] = parse_diag.pot_rejected_reason
             diagnostics["legal_actions_raw"] = "|".join(parse_diag.legal_actions_raw) or "--"
             diagnostics["legal_actions_normalized"] = ",".join(parse_diag.legal_actions_normalized) or "--"
+            diagnostics["amount_to_call_raw"] = parse_diag.amount_to_call_raw or "--"
+            diagnostics["amount_to_call_parsed"] = (
+                f"{parse_diag.amount_to_call_parsed:,.0f}"
+                if parse_diag.amount_to_call_parsed is not None
+                else "--"
+            )
             if parse_diag.block_reason:
                 diagnostics["block_reason"] = parse_diag.block_reason
         block_reason = recommendation.decision_blocked_reason or (

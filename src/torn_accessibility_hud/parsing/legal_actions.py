@@ -80,15 +80,12 @@ def normalize_action_text(text: str, ocr_confidence: float = 1.0) -> NormalizedL
     if best_score < _MIN_MATCH_SCORE:
         return None
     if ambiguous:
-        if {best_label, ranked[1][0]} == {"check", "call"}:
-            if scores["check"] >= scores["call"]:
-                best_label = "check"
-                ambiguous = scores["call"] >= scores["check"] - 0.03
-            else:
-                best_label = "call"
-                ambiguous = scores["check"] >= scores["call"] - 0.03
-        else:
-            ambiguous = True
+        return NormalizedLegalAction(
+            label=best_label,
+            confidence=max(0.0, min(1.0, best_score * max(ocr_confidence, 0.1))),
+            raw_text=text.strip(),
+            ambiguous=True,
+        )
     confidence = max(0.0, min(1.0, best_score * max(ocr_confidence, 0.1)))
     return NormalizedLegalAction(
         label=best_label,
@@ -147,7 +144,9 @@ def allowed_labels_for_region(region_name: str) -> tuple[str, ...]:
 
 
 def legal_action_to_recommended(label: str) -> RecommendedAction:
-    if label in {"bet", "raise"}:
+    if label == "bet":
+        return RecommendedAction.BET
+    if label == "raise":
         return RecommendedAction.RAISE
     return RecommendedAction(label)
 

@@ -740,6 +740,19 @@ class CardRegionDebugger:
     def debug_enabled(self) -> bool:
         return self.config.debug_card_regions
 
+    @property
+    def hero_cards_stable(self) -> bool:
+        return self._card_stabilizer.is_confirmed("hero_cards_region", minimum_cards=2)
+
+    @property
+    def board_cards_stable(self) -> bool:
+        if not self.board_cards_scanned:
+            return True
+        published = self._card_stabilizer.published("board_cards_region")
+        if not published:
+            return True
+        return len(published) >= 3
+
     def write_stability_skip(self, capture: ScreenCapture, frame_id: int, reason: str) -> None:
         if not self.debug_enabled:
             return
@@ -1010,6 +1023,8 @@ class OCRWorker(threading.Thread):
                                         hero_region_folded=card_debugger.hero_region_folded,
                                         hero_cards_scanned=card_debugger.hero_cards_scanned,
                                         board_cards_scanned=card_debugger.board_cards_scanned,
+                                        hero_cards_stable=card_debugger.hero_cards_stable,
+                                        board_cards_stable=card_debugger.board_cards_stable,
                                         table_ocr=table_ocr,
                                     )
                                 )
@@ -1034,6 +1049,8 @@ class OCRWorker(threading.Thread):
                                             hero_region_folded=card_debugger.hero_region_folded,
                                             hero_cards_scanned=card_debugger.hero_cards_scanned,
                                             board_cards_scanned=card_debugger.board_cards_scanned,
+                                            hero_cards_stable=card_debugger.hero_cards_stable,
+                                            board_cards_stable=card_debugger.board_cards_stable,
                                             table_ocr=table_ocr,
                                         )
                                     )

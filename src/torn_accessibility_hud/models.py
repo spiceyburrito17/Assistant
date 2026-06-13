@@ -43,6 +43,7 @@ class RecommendedAction(str, Enum):
     FOLD = "fold"
     CALL = "call"
     CHECK = "check"
+    BET = "bet"
     RAISE = "raise"
     WAIT = "wait"
 
@@ -138,6 +139,8 @@ class TableParseDiagnostics:
     pot_rejected_reason: str | None = None
     legal_actions_raw: tuple[str, ...] = ()
     legal_actions_normalized: tuple[str, ...] = ()
+    amount_to_call_raw: str | None = None
+    amount_to_call_parsed: float | None = None
     actions_ambiguous: bool = False
     block_reason: str | None = None
 
@@ -153,6 +156,8 @@ class OCRBatch:
     hero_cards_scanned: bool = False
     board_cards_scanned: bool = False
     table_ocr: TableOCRResult | None = None
+    hero_cards_stable: bool = True
+    board_cards_stable: bool = True
 
 
 @dataclass(frozen=True)
@@ -207,6 +212,9 @@ class GameSnapshot:
 
     @property
     def trusted_to_call(self) -> float | None:
+        if self.parse_diagnostics is not None:
+            if self.parse_diagnostics.block_reason == "amount_to_call_unreadable":
+                return None
         return self.to_call
 
 

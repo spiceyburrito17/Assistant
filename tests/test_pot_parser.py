@@ -90,6 +90,42 @@ class PotParserTests(unittest.TestCase):
         self.assertEqual(amount, 545.0)
         self.assertEqual(status, "ok")
 
+    def test_misread_dollar_as_five_before_short_amount(self) -> None:
+        result = parse_pot_text_detailed("POT 585")
+        self.assertEqual(result.normalized, 85.0)
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.candidate, "85")
+        self.assertEqual(result.pot_anchor_match, "POT")
+
+    def test_misread_dollar_as_five_before_two_digit_amount_with_colon(self) -> None:
+        amount, status = parse_pot_text("POT: 585")
+        self.assertEqual(amount, 85.0)
+        self.assertEqual(status, "ok")
+
+    def test_misread_dollar_as_six_before_amount(self) -> None:
+        result = parse_pot_text_detailed("POT 6190")
+        self.assertEqual(result.normalized, 190.0)
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.candidate, "190")
+        self.assertEqual(result.pot_anchor_match, "POT")
+        self.assertEqual(result.pot_digits_start, 5)
+
+    def test_misread_dollar_as_six_with_label_punctuation(self) -> None:
+        amount, status = parse_pot_text("POT: 6190")
+        self.assertEqual(amount, 190.0)
+        self.assertEqual(status, "ok")
+
+    def test_real_pot_starting_with_six_not_stripped(self) -> None:
+        amount, status = parse_pot_text("POT: 600")
+        self.assertEqual(amount, 600.0)
+        self.assertEqual(status, "ok")
+
+    def test_misread_dollar_before_comma_amount(self) -> None:
+        result = parse_pot_text_detailed("POT51,145")
+        self.assertEqual(result.normalized, 1145.0)
+        self.assertEqual(result.candidate, "1,145")
+        self.assertEqual(result.status, "ok")
+
 
 class PotSanityTests(unittest.TestCase):
     def test_rejects_absurd_jump(self) -> None:
@@ -106,6 +142,36 @@ class PotSanityTests(unittest.TestCase):
         accepted, reason = validate_pot_update(50.0, previous=540.0, hand_reset=True)
         self.assertEqual(accepted, 50.0)
         self.assertIsNone(reason)
+
+    def test_allows_leading_five_misread_correction(self) -> None:
+        accepted, reason = validate_pot_update(85.0, previous=585.0, hand_reset=False)
+        self.assertEqual(accepted, 85.0)
+        self.assertIsNone(reason)
+
+    def test_allows_leading_six_misread_correction(self) -> None:
+        accepted, reason = validate_pot_update(190.0, previous=6190.0, hand_reset=False)
+        self.assertEqual(accepted, 190.0)
+        self.assertIsNone(reason)
+
+    def test_table_region_allows_large_stale_correction(self) -> None:
+        accepted, reason = validate_pot_update(
+            1145.0,
+            previous=33110.0,
+            hand_reset=False,
+            from_table_region=True,
+        )
+        self.assertEqual(accepted, 1145.0)
+        self.assertIsNone(reason)
+
+    def test_table_region_rejects_small_decrease(self) -> None:
+        accepted, reason = validate_pot_update(
+            800.0,
+            previous=1145.0,
+            hand_reset=False,
+            from_table_region=True,
+        )
+        self.assertIsNone(accepted)
+        self.assertEqual(reason, "pot decreased within hand")
 
 
 class TrustedPotSanityTests(unittest.TestCase):

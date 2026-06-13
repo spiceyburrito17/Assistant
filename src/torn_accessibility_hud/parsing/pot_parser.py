@@ -8,6 +8,8 @@ from dataclasses import dataclass
 _POT_TARGET = "POT"
 _PUNCT_AFTER_POT = frozenset(" \t:-.;")
 _MIN_WEAK_DIGITS = 3
+_MISREAD_DOLLAR_DIGITS = frozenset("56")
+_CURRENCY_CHARS = frozenset("$£€")
 # Per-position OCR confusions when the pot allowlist excludes letters (POT read as 816).
 _POT_OCR_EQUIV: tuple[frozenset[str], ...] = (
     frozenset("P89"),
@@ -63,11 +65,9 @@ def parse_pot_text_detailed(raw: str) -> PotParseResult:
         return PotParseResult(None, "no_pot_marker", None, raw)
 
     cursor = anchor.index + anchor.length
-    while cursor < len(raw) and raw[cursor] in _PUNCT_AFTER_POT:
-        cursor += 1
+    cursor = _skip_pot_label_suffix(raw, cursor)
 
-    digits_start = _skip_optional_currency_prefix(raw, cursor)
-    candidate = _extract_digit_amount(raw, digits_start)
+    digits_start, candidate = _resolve_amount_token(raw, cursor)
     if candidate is None:
         return _result(
             None,
@@ -87,6 +87,31 @@ def parse_pot_text_detailed(raw: str) -> PotParseResult:
         return _result(None, "invalid_token", candidate, raw, anchor, digits_start)
 
     return _result(normalized, "ok", candidate, raw, anchor, digits_start)
+
+
+def _skip_pot_label_suffix(text: str, start: int) -> int:
+    """Skip ``POT: $`` label tail: punctuation, whitespace, then one currency slot."""
+
+    cursor = start
+    while cursor < len(text) and text[cursor] in _PUNCT_AFTER_POT:
+        cursor += 1
+    return _skip_optional_currency_prefix(text, cursor)
+
+
+def _resolve_amount_token(text: str, cursor: int) -> tuple[int, str | None]:
+    """Resolve the first money token, retrying without a skipped currency char."""
+
+    digits_start = _skip_optional_currency_prefix(text, cursor)
+    candidate = _extract_digit_amount(text, digits_start)
+    if candidate is not None and _digits_to_amount(candidate) is not None:
+        return digits_start, candidate
+
+    if digits_start != cursor:
+        candidate = _extract_digit_amount(text, cursor)
+        if candidate is not None:
+            return cursor, candidate
+
+    return digits_start, candidate
 
 
 def _result(
@@ -201,17 +226,24 @@ def _weak_read_reason(anchor_confidence: float, candidate: str) -> str | None:
 
 
 def _skip_optional_currency_prefix(text: str, start: int) -> int:
-    """Skip one currency/junk character immediately before the amount digits."""
+    """Skip one ``$`` slot or common OCR misread of it before amount digits."""
 
     if start >= len(text):
         return start
 
     char = text[start]
-    if char in "$£€":
+    if char in _CURRENCY_CHARS:
         return start + 1
 
-    if char == "5" and _should_skip_misread_dollar_prefix(text, start):
+    if char in "Ss" and start + 1 < len(text) and text[start + 1].isdigit():
         return start + 1
+
+    if char in _MISREAD_DOLLAR_DIGITS:
+        full_candidate = _extract_digit_amount(text, start)
+        if full_candidate is not None:
+            skipped_candidate = _extract_digit_amount(text, start + 1)
+            if skipped_candidate and _should_skip_misread_dollar_digit(full_candidate, skipped_candidate):
+                return start + 1
 
     if not char.isdigit() and start + 1 < len(text) and text[start + 1].isdigit():
         return start + 1
@@ -219,17 +251,25 @@ def _skip_optional_currency_prefix(text: str, start: int) -> int:
     return start
 
 
-def _should_skip_misread_dollar_prefix(text: str, start: int) -> bool:
-    """Skip a leading 5 only when it likely represents a misread dollar sign."""
+def _should_skip_misread_dollar_digit(full: str, skipped: str) -> bool:
+    """Treat a leading ``5``/``6`` as a misread dollar sign before the real amount."""
 
-    digit_run = _peek_digit_comma_run(text, start)
-    digits_only = re.sub(r"[^\d]", "", digit_run)
-    return len(digits_only) >= 4
-
-
-def _peek_digit_comma_run(text: str, start: int) -> str:
-    candidate, _end = _extract_digit_amount_with_end(text, start)
-    return candidate or ""
+    full_digits = re.sub(r"[^\d]", "", full)
+    skipped_digits = re.sub(r"[^\d]", "", skipped)
+    if not full_digits or full_digits[0] not in _MISREAD_DOLLAR_DIGITS or not skipped_digits:
+        return False
+    try:
+        full_val = float(full_digits)
+        skipped_val = float(skipped_digits)
+    except ValueError:
+        return False
+    if skipped_val <= 0:
+        return False
+    if len(full_digits) >= 4:
+        return True
+    if len(full_digits) == 3 and len(skipped_digits) >= 2:
+        return full_val / skipped_val < 8.0
+    return False
 
 
 def _extract_digit_amount(text: str, start: int) -> str | None:

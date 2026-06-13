@@ -7,7 +7,7 @@
       "width": 396,
       "height": 176
     },
-    "fps_limit": 12.0
+    "fps_limit": 15.0
   },
   "debounce": {
     "stable_frames_required": 3,
@@ -38,8 +38,10 @@
     "card_cache_max_missing_scans": 12,
     "pot_ocr_scale": 4.0,
     "pot_ocr_allowlist": "POT: $0123456789,.",
+    "pot_ocr_interval_sec": 0.0,
     "action_ocr_scale": 3.0,
-    "action_ocr_allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "
+    "action_ocr_allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",
+    "action_ocr_interval_sec": 0.0
   },
   "parser": {
     "max_reasonable_amount": 10000000.0,
