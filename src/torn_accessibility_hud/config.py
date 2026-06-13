@@ -78,6 +78,12 @@ class EquityConfig:
 
 
 @dataclass(frozen=True)
+class DebugConfig:
+    session_csv_enabled: bool = True
+    session_csv_path: str = "debug_captures/debug_current_session.csv"
+
+
+@dataclass(frozen=True)
 class OverlayConfig:
     title: str = "Torn Accessibility HUD"
     width: int = 440
@@ -186,6 +192,7 @@ class AppConfig:
     parser: ParserConfig = ParserConfig()
     equity: EquityConfig = EquityConfig()
     overlay: OverlayConfig = OverlayConfig()
+    debug: DebugConfig = DebugConfig()
 
     @classmethod
     def default(cls) -> "AppConfig":
@@ -208,6 +215,7 @@ _NESTED_TYPES: dict[str, type[Any]] = {
     "parser": ParserConfig,
     "equity": EquityConfig,
     "overlay": OverlayConfig,
+    "debug": DebugConfig,
 }
 
 
@@ -305,6 +313,10 @@ def write_default_config(path: str | Path) -> Path:
             "timeout_ms": 450,
             "max_opponents": 8,
             "random_seed": None,
+        },
+        "debug": {
+            "session_csv_enabled": True,
+            "session_csv_path": "debug_captures/debug_current_session.csv",
         },
         "overlay": {
             "title": "Torn Accessibility HUD",

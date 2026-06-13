@@ -17,6 +17,7 @@ debug_log("app module import started")
 debug_log("app module importing internal components")
 
 from .config import AppConfig, write_default_config
+from .debug_session_csv import SessionDebugCSVLogger, SessionDebugEventTracker
 from .models import ActionType, EquityRequest, EquityResult, GameSnapshot, OCRBatch, OverlayState, ParsedEvent, Street
 from .parsing.log_parser import ActionLogParser
 from .poker.equity import EquityWorker
@@ -120,6 +121,17 @@ class CoordinatorWorker(threading.Thread):
         self.latest_lines: tuple[str, ...] = ()
         self.latest_equity: EquityResult | None = None
         self.last_submitted_generation = -1
+        self._session_debug_tracker: SessionDebugEventTracker | None = None
+        if config.debug.session_csv_enabled:
+            session_logger = SessionDebugCSVLogger(config.debug.session_csv_path)
+            self._session_debug_tracker = SessionDebugEventTracker(session_logger)
+            write_startup_log(
+                f"app startup: session debug CSV reset at {config.debug.session_csv_path}"
+            )
+            debug_log(
+                "app startup: session debug CSV reset at %s",
+                config.debug.session_csv_path,
+            )
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -248,6 +260,8 @@ class CoordinatorWorker(threading.Thread):
             return
         self._last_published = state
         self.overlay.publish(state)
+        if self._session_debug_tracker is not None:
+            self._session_debug_tracker.observe(snapshot, recommendation)
 
     @staticmethod
     def _overlay_state_unchanged(previous: OverlayState, current: OverlayState) -> bool:
