@@ -13,10 +13,17 @@ import numpy as np
 from ..config import AppConfig, OCRConfig, RegionsConfig
 from ..diagnostics import debug_log, exception_log, write_startup_log
 from ..models import OCRBatch, OCRLine
+from ..state import CardReadStabilizer
 from .capture import ScreenCapture
 from .debounce import StableFrameDebouncer
 
 CARD_RANK_ALLOWLIST = "0123456789AaKkQqJjTt"
+# Card faces are bright; a higher floor avoids merging adjacent cards + table felt.
+CARD_WHITE_VALUE_MIN = 170
+# Sample the rank/suit corner; large center pips add noise but the suit glyph sits below the rank.
+SUIT_SAMPLE_FRACTION = 0.40
+SUIT_SCORE_THRESHOLD = 8
+SUIT_COLORED_MIN = 8
 
 
 class EasyOCREngine:
@@ -107,7 +114,10 @@ def detect_suit_from_card_image_with_debug(card_bgr: np.ndarray[Any, Any]) -> tu
 
     if card_bgr.size == 0:
         return None, ("[suit color] SKIPPED - empty crop",)
-    sample = card_bgr[: max(1, int(card_bgr.shape[0] * 0.45)), : max(1, int(card_bgr.shape[1] * 0.45))]
+    sample = card_bgr[
+        : max(1, int(card_bgr.shape[0] * SUIT_SAMPLE_FRACTION)),
+        : max(1, int(card_bgr.shape[1] * SUIT_SAMPLE_FRACTION)),
+    ]
     hsv = cv2.cvtColor(sample, cv2.COLOR_BGR2HSV)
     bgr_mean = tuple(float(value) for value in np.mean(sample.reshape(-1, 3), axis=0))
     hsv_mean = tuple(float(value) for value in np.mean(hsv.reshape(-1, 3), axis=0))
@@ -123,14 +133,20 @@ def detect_suit_from_card_image_with_debug(card_bgr: np.ndarray[Any, Any]) -> tu
         # Clubs are green, sometimes very light in dark mode.
         "c": cv2.inRange(hsv, (35, 35, 40), (90, 255, 255)),
     }
-    scores = {suit: int(mask.sum() // 255) for suit, mask in masks.items()}
+    colored_scores = {suit: int(mask.sum() // 255) for suit, mask in masks.items()}
     gray = cv2.cvtColor(sample, cv2.COLOR_BGR2GRAY)
     # Spades are black in light mode, but white/light-grey in Torn dark mode.
     dark_score = int(cv2.inRange(gray, 0, 95).sum() // 255)
-    light_neutral_mask = cv2.inRange(hsv, (0, 0, 145), (180, 80, 255))
+    light_neutral_mask = cv2.inRange(hsv, (0, 0, 145), (180, 40, 220))
     light_neutral_score = int(light_neutral_mask.sum() // 255)
-    scores["s"] = max(dark_score, light_neutral_score)
-    best_suit, best_score = max(scores.items(), key=lambda item: item[1])
+    colored_total = sum(colored_scores.values())
+    scores = dict(colored_scores)
+    if colored_total >= SUIT_COLORED_MIN:
+        # White card backgrounds otherwise dominate the light-neutral spade fallback.
+        best_suit, best_score = max(colored_scores.items(), key=lambda item: item[1])
+    else:
+        scores["s"] = max(dark_score, light_neutral_score)
+        best_suit, best_score = max(scores.items(), key=lambda item: item[1])
     debug_lines = [
         "[suit color] "
         f"sample_size={sample.shape[1]}x{sample.shape[0]} "
@@ -141,13 +157,16 @@ def detect_suit_from_card_image_with_debug(card_bgr: np.ndarray[Any, Any]) -> tu
         f"dominant_hsv=({dominant_hsv[0]},{dominant_hsv[1]},{dominant_hsv[2]}) "
         f"dominant_count={dominant_count}",
         "[suit color] "
-        f"scores hearts={scores['h']} diamonds={scores['d']} clubs={scores['c']} "
-        f"spades={scores['s']} dark_spade={dark_score} light_spade={light_neutral_score}",
+        f"scores hearts={colored_scores['h']} diamonds={colored_scores['d']} clubs={colored_scores['c']} "
+        f"spades={scores.get('s', 0)} dark_spade={dark_score} light_spade={light_neutral_score} "
+        f"colored_total={colored_total}",
     ]
-    if best_score >= 8:
+    if best_score >= SUIT_SCORE_THRESHOLD:
         debug_lines.append(f"[suit color] matched suit={best_suit} score={best_score}")
         return best_suit, tuple(debug_lines)
-    debug_lines.append(f"[suit color] FAILED - best_suit={best_suit} best_score={best_score} threshold=8")
+    debug_lines.append(
+        f"[suit color] FAILED - best_suit={best_suit} best_score={best_score} threshold={SUIT_SCORE_THRESHOLD}"
+    )
     return None, tuple(debug_lines)
 
 
@@ -292,20 +311,29 @@ def folded_hero_debug(region_bgr: np.ndarray[Any, Any]) -> tuple[bool, tuple[str
 
     if region_bgr.size == 0:
         return False, ("[hero folded guard] region empty; not folded",)
+    height, width = region_bgr.shape[:2]
     hsv = cv2.cvtColor(region_bgr, cv2.COLOR_BGR2HSV)
     saturation = hsv[:, :, 1]
     value = hsv[:, :, 2]
     low_saturation_ratio = float(np.mean(saturation < 45))
     dim_ratio = float(np.mean(value < 150))
+    corner = hsv[: max(1, int(height * 0.35)), : max(1, int(width * 0.50))]
+    corner_colored_ratio = float(np.mean(corner[:, :, 1] > 45))
     upper = region_bgr[: max(1, int(region_bgr.shape[0] * 0.35))]
     upper_gray = cv2.cvtColor(upper, cv2.COLOR_BGR2GRAY)
     row_darkness = np.mean(upper_gray < 120, axis=1)
     has_long_horizontal_overlay = bool(np.any(row_darkness > 0.55))
-    is_folded = (low_saturation_ratio > 0.55 and dim_ratio > 0.35) or has_long_horizontal_overlay
+    grey_overlay = (
+        dim_ratio > 0.35
+        and low_saturation_ratio > 0.55
+        and corner_colored_ratio < 0.06
+    )
+    is_folded = has_long_horizontal_overlay or grey_overlay
     return is_folded, (
         "[hero folded guard] "
         f"folded={is_folded} low_saturation_ratio={low_saturation_ratio:.3f} "
-        f"dim_ratio={dim_ratio:.3f} has_long_horizontal_overlay={has_long_horizontal_overlay}",
+        f"dim_ratio={dim_ratio:.3f} corner_colored_ratio={corner_colored_ratio:.3f} "
+        f"has_long_horizontal_overlay={has_long_horizontal_overlay}",
     )
 
 
@@ -324,7 +352,7 @@ def find_card_face_crops_with_debug(region_bgr: np.ndarray[Any, Any]) -> tuple[t
     if region_bgr.size == 0:
         return (), ("[detector] SKIPPED - region image is empty",)
     hsv = cv2.cvtColor(region_bgr, cv2.COLOR_BGR2HSV)
-    white_mask = cv2.inRange(hsv, (0, 0, 130), (180, 80, 255))
+    white_mask = cv2.inRange(hsv, (0, 0, CARD_WHITE_VALUE_MIN), (180, 80, 255))
     kernel = np.ones((3, 3), dtype=np.uint8)
     white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
     contours, _hierarchy = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -379,7 +407,71 @@ def find_card_face_crops_with_debug(region_bgr: np.ndarray[Any, Any]) -> tuple[t
             f"(back_score={back_score:.3f}, white_ratio={white_ratio:.3f}, dark_ratio={dark_ratio:.3f})"
         )
         crops.append((x, crop))
+    if not crops:
+        fallback_crops, fallback_debug = _fallback_split_card_crops_with_debug(region_bgr)
+        debug_lines.extend(fallback_debug)
+        crops = [(index * 1000, crop) for index, crop in enumerate(fallback_crops)]
     return tuple(crop for _x, crop in sorted(crops, key=lambda item: item[0])), tuple(debug_lines)
+
+
+def _fallback_split_card_crops_with_debug(
+    region_bgr: np.ndarray[Any, Any],
+) -> tuple[tuple[np.ndarray[Any, Any], ...], tuple[str, ...]]:
+    """Split a merged hero/board row when contour detection finds no card boxes."""
+
+    import cv2
+
+    height, width = region_bgr.shape[:2]
+    aspect = width / max(height, 1)
+    if aspect < 1.15:
+        return (), ("[detector] split fallback SKIPPED - region aspect too narrow",)
+    slice_count = 2 if aspect < 2.0 else max(3, min(5, round(aspect / 0.72)))
+    debug_lines = [f"[detector] split fallback aspect={aspect:.3f} slices={slice_count}"]
+    crops: list[np.ndarray[Any, Any]] = []
+    for index in range(slice_count):
+        x0 = index * width // slice_count
+        x1 = (index + 1) * width // slice_count if index < slice_count - 1 else width
+        slice_bgr = region_bgr[:, x0:x1]
+        crop = _best_card_crop_from_slice(slice_bgr)
+        if crop.size == 0:
+            debug_lines.append(f"[detector] split slice_{index} SKIPPED - empty crop")
+            continue
+        back_score, white_ratio, dark_ratio = card_back_score(crop)
+        if back_score >= 0.80:
+            debug_lines.append(
+                f"[detector] split slice_{index} SKIPPED - card back "
+                f"(score={back_score:.3f}, white_ratio={white_ratio:.3f}, dark_ratio={dark_ratio:.3f})"
+            )
+            continue
+        debug_lines.append(
+            f"[detector] split slice_{index} accepted size={crop.shape[1]}x{crop.shape[0]} px "
+            f"(back_score={back_score:.3f})"
+        )
+        crops.append(crop)
+    return tuple(crops), tuple(debug_lines)
+
+
+def _best_card_crop_from_slice(slice_bgr: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    """Return the largest white card rectangle inside a horizontal slice."""
+
+    import cv2
+
+    if slice_bgr.size == 0:
+        return slice_bgr[0:0, 0:0]
+    hsv = cv2.cvtColor(slice_bgr, cv2.COLOR_BGR2HSV)
+    white_mask = cv2.inRange(hsv, (0, 0, CARD_WHITE_VALUE_MIN), (180, 80, 255))
+    kernel = np.ones((3, 3), dtype=np.uint8)
+    white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    contours, _hierarchy = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    best_crop = slice_bgr
+    best_area = 0
+    for contour in contours:
+        x, y, crop_width, crop_height = cv2.boundingRect(contour)
+        area = crop_width * crop_height
+        if area > best_area and crop_height >= 20 and crop_width >= 14:
+            best_area = area
+            best_crop = slice_bgr[y : y + crop_height, x : x + crop_width]
+    return best_crop
 
 
 def _merge_overlapping_boxes(boxes: list[tuple[int, int, int, int]]) -> list[tuple[int, int, int, int]]:
@@ -421,6 +513,7 @@ def read_card_rank_from_crop_with_debug(
         return None, (f"[{crop_label}] empty card crop",)
     height, width = card_bgr.shape[:2]
     crop_specs = (
+        (0.00, 0.00, 0.35, 0.30),
         (0.00, 0.00, 0.45, 0.36),
         (0.00, 0.00, 0.55, 0.45),
         (0.00, 0.00, 0.70, 0.32),
@@ -428,13 +521,15 @@ def read_card_rank_from_crop_with_debug(
     debug_lines: list[str] = []
     for crop_index, (x0, y0, x1, y1) in enumerate(crop_specs):
         crop = card_bgr[int(height * y0) : max(1, int(height * y1)), int(width * x0) : max(1, int(width * x1))]
+        rank_scale = _effective_rank_scale(crop, scale)
         debug_lines.append(
             f"[{crop_label}.rank_crop_{crop_index}] extracted size={crop.shape[1]}x{crop.shape[0]} px "
-            f"from card size={width}x{height} px"
+            f"from card size={width}x{height} px rank_scale={rank_scale:.2f}"
         )
         variants = (
-            ("adaptive_dark_on_light", preprocess_card_region(crop, scale=scale)),
-            ("simple_dark_on_light", _preprocess_rank_light(crop, scale=scale)),
+            ("adaptive_dark_on_light", preprocess_card_region(crop, scale=rank_scale)),
+            ("simple_dark_on_light", _preprocess_rank_light(crop, scale=rank_scale)),
+            ("gray_inverted", _preprocess_rank_gray_inverted(crop, scale=rank_scale)),
         )
         for variant_name, variant in variants:
             raw_lines = ocr.read_raw(variant, allowlist=CARD_RANK_ALLOWLIST)
@@ -463,6 +558,24 @@ def _preprocess_rank_light(frame: np.ndarray[Any, Any], scale: float) -> np.ndar
     blurred = cv2.GaussianBlur(clahe, (3, 3), 0)
     _threshold, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
     return cv2.cvtColor(_ensure_dark_text_on_light(binary), cv2.COLOR_GRAY2BGR)
+
+
+def _preprocess_rank_gray_inverted(frame: np.ndarray[Any, Any], scale: float) -> np.ndarray[Any, np.dtype[np.uint8]]:
+    """Simple grayscale inversion for four-color rank glyphs that CLAHE washes out."""
+
+    import cv2
+
+    resized = cv2.resize(frame, None, fx=max(scale, 1.0), fy=max(scale, 1.0), interpolation=cv2.INTER_CUBIC)
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    return cv2.cvtColor(_ensure_dark_text_on_light(gray), cv2.COLOR_GRAY2BGR)
+
+
+def _effective_rank_scale(crop: np.ndarray[Any, Any], scale: float) -> float:
+    """Upscale small rank corners enough for EasyOCR without over-scaling large crops."""
+
+    min_side = min(crop.shape[:2])
+    size_boost = 150.0 / max(min_side, 1)
+    return max(scale, size_boost, 4.0)
 
 
 def _ensure_dark_text_on_light(gray: np.ndarray[Any, Any]) -> np.ndarray[Any, np.dtype[np.uint8]]:
@@ -611,7 +724,12 @@ class CardRegionDebugger:
         self.regions = self._load_regions(config.calibrated_regions_path)
         self.last_saved_at: dict[str, float] = {}
         self.last_error: str | None = None
-        self.last_detected: dict[str, tuple[str, ...]] = {}
+        self.hero_region_folded = False
+        self.hero_cards_scanned = False
+        self.board_cards_scanned = False
+        self._card_stabilizer = CardReadStabilizer(
+            stable_reads_required=max(config.card_stable_reads_required, 1),
+        )
         self._log_configured_regions()
 
     @property
@@ -657,6 +775,8 @@ class CardRegionDebugger:
             )
             return ()
         diagnostic_lines: list[OCRLine] = []
+        self.hero_cards_scanned = False
+        self.board_cards_scanned = False
         for region_name, label in self.REGION_ATTRS:
             interval = self._interval_for_region(region_name)
             last_saved_at = self.last_saved_at.get(region_name, 0.0)
@@ -676,6 +796,13 @@ class CardRegionDebugger:
                 raw.shape[1],
                 raw.shape[0],
             )
+            hero_folded_debug_lines: tuple[str, ...] = ()
+            if region_name == "hero_cards_region":
+                is_folded, hero_folded_debug_lines = folded_hero_debug(raw)
+                self.hero_region_folded = is_folded
+                self.hero_cards_scanned = True
+            else:
+                self.board_cards_scanned = True
             prefix = self._debug_prefix(region_name, frame_id)
             header_lines = self._debug_header(frame_id, region_name, raw)
             self._write_debug_text(prefix, header_lines)
@@ -697,6 +824,9 @@ class CardRegionDebugger:
                 )
                 expected_cards = 2 if region_name == "hero_cards_region" else 3
                 max_cards = 2 if region_name == "hero_cards_region" else 5
+                confirmed_cards = None
+                if expected_cards <= len(detected_cards) <= max_cards:
+                    confirmed_cards = self._card_stabilizer.observe(region_name, detected_cards)
                 all_debug_lines = (
                     *header_lines,
                     f"[preprocess] region_preprocessed size={processed.shape[1]}x{processed.shape[0]} px",
@@ -705,16 +835,16 @@ class CardRegionDebugger:
                         region_raw_ocr,
                         allowlist=self.config.card_ocr_allowlist,
                     ),
-                    *self._folded_gate_debug_lines(region_name),
+                    *hero_folded_debug_lines,
                     *debug_lines_for_file,
                     f"[detected_cards] {' '.join(detected_cards) if detected_cards else '<none>'}",
+                    f"[stable_cards] published={' '.join(confirmed_cards) if confirmed_cards else '<held>'}",
                 )
-                if expected_cards <= len(detected_cards) <= max_cards and detected_cards != self.last_detected.get(region_name):
-                    diagnostic_text = " ".join(detected_cards)
+                if confirmed_cards is not None:
+                    diagnostic_text = " ".join(confirmed_cards)
                     diagnostic_lines.append(
                         OCRLine(text=f"{label}: {diagnostic_text}", confidence=1.0)
                     )
-                    self.last_detected[region_name] = detected_cards
                 self._save_debug_images(prefix, raw, processed, all_debug_lines)
             except Exception as exc:  # noqa: BLE001 - debug logging must survive detector failures
                 error_lines = (*header_lines, f"[error] {type(exc).__name__}: {exc}")
@@ -728,14 +858,6 @@ class CardRegionDebugger:
         if region_name == "hero_cards_region":
             return max(self.config.hero_cards_interval_sec, 0.0)
         return max(self.config.debug_card_regions_interval_sec, 0.1)
-
-    @staticmethod
-    def _folded_gate_debug_lines(region_name: str) -> tuple[str, ...]:
-        if region_name != "hero_cards_region":
-            return ()
-        return (
-            "[hero folded guard] disabled - Torn dark/inverted card theme can look greyed; attempting OCR anyway",
-        )
 
     def _debug_prefix(self, region_name: str, frame_id: int) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -863,7 +985,14 @@ class OCRWorker(threading.Thread):
                                 lines = ocr.read(frame)
                                 self._frame_id += 1
                                 self._put_latest(
-                                    OCRBatch(lines=lines + card_lines, frame_id=self._frame_id, captured_at=time.time())
+                                    OCRBatch(
+                                        lines=lines + card_lines,
+                                        frame_id=self._frame_id,
+                                        captured_at=time.time(),
+                                        hero_region_folded=card_debugger.hero_region_folded,
+                                        hero_cards_scanned=card_debugger.hero_cards_scanned,
+                                        board_cards_scanned=card_debugger.board_cards_scanned,
+                                    )
                                 )
                                 if card_debugger.last_error:
                                     self.last_error = card_debugger.last_error
@@ -881,6 +1010,9 @@ class OCRWorker(threading.Thread):
                                             lines=card_lines,
                                             frame_id=self._capture_frame_id,
                                             captured_at=time.time(),
+                                            hero_region_folded=card_debugger.hero_region_folded,
+                                            hero_cards_scanned=card_debugger.hero_cards_scanned,
+                                            board_cards_scanned=card_debugger.board_cards_scanned,
                                         )
                                     )
                         except Exception as exc:  # noqa: BLE001 - worker must not kill the UI loop

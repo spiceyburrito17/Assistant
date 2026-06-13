@@ -73,6 +73,9 @@ class OCRBatch:
     lines: tuple[OCRLine, ...]
     frame_id: int
     captured_at: float
+    hero_region_folded: bool = False
+    hero_cards_scanned: bool = False
+    board_cards_scanned: bool = False
 
 
 @dataclass(frozen=True)

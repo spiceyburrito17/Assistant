@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..models import EquityResult, GameSnapshot, Recommendation, RecommendationLevel
 
 
@@ -24,13 +26,24 @@ class RecommendationEngine:
                 detail="Waiting for stable hero cards.",
                 color_hex=self.COLORS[RecommendationLevel.WAIT],
             )
-        if result is None or result.generation != snapshot.generation:
+        if result is None:
             return Recommendation(
                 level=RecommendationLevel.WAIT,
                 title="READING",
                 detail="Stable frame accepted; equity is updating.",
                 color_hex=self.COLORS[RecommendationLevel.WAIT],
             )
+        if result.generation != snapshot.generation:
+            # Cache restores and other non-hand updates keep the same cards; reuse recent equity.
+            if result.hero_equity is not None and abs(result.generation - snapshot.generation) <= 1:
+                result = replace(result, generation=snapshot.generation)
+            else:
+                return Recommendation(
+                    level=RecommendationLevel.WAIT,
+                    title="READING",
+                    detail="Stable frame accepted; equity is updating.",
+                    color_hex=self.COLORS[RecommendationLevel.WAIT],
+                )
         if result.warning and result.simulations == 0:
             if result.hero_equity is None:
                 return Recommendation(

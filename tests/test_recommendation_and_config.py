@@ -15,8 +15,14 @@ class RecommendationAndConfigTests(unittest.TestCase):
         recommendation = RecommendationEngine().build(snapshot, result)
         self.assertEqual(recommendation.level, RecommendationLevel.SAFE)
 
-    def test_recommendation_waits_for_matching_generation(self) -> None:
-        snapshot = GameSnapshot(hero_cards=("As", "Kd"), active_opponents=("Fox",), generation=4)
+    def test_recommendation_reuses_recent_equity_when_generation_is_one_off(self) -> None:
+        snapshot = GameSnapshot(hero_cards=("As", "Kd"), pot_size=1000, to_call=100, active_opponents=("Fox",), generation=4)
+        result = EquityResult(hero_equity=0.35, tie_rate=0.0, simulations=100, generation=3, elapsed_ms=10)
+        recommendation = RecommendationEngine().build(snapshot, result)
+        self.assertEqual(recommendation.level, RecommendationLevel.SAFE)
+
+    def test_recommendation_waits_for_stale_generation(self) -> None:
+        snapshot = GameSnapshot(hero_cards=("As", "Kd"), active_opponents=("Fox",), generation=10)
         result = EquityResult(hero_equity=0.9, tie_rate=0.0, simulations=100, generation=3, elapsed_ms=10)
         recommendation = RecommendationEngine().build(snapshot, result)
         self.assertEqual(recommendation.level, RecommendationLevel.WAIT)

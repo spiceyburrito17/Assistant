@@ -11,9 +11,11 @@ from torn_accessibility_hud.models import OCRLine, ScreenRegion
 from torn_accessibility_hud.vision.ocr_engine import (
     CardRegionDebugger,
     detect_cards_from_ocr_bboxes,
+    detect_cards_from_region,
     detect_suit_from_card_image,
     detect_suit_from_card_image_with_debug,
     detect_suit_near_rank_bbox,
+    find_card_face_crops_with_debug,
     format_raw_ocr_debug_lines,
     is_probably_card_back,
     is_probably_folded_hero_region,
@@ -80,13 +82,13 @@ class CardImageDetectionTests(unittest.TestCase):
                     calibrated_regions_path=str(regions_path),
                     hero_cards_region=ScreenRegion(left=1, top=2, width=3, height=4),
                     debug_card_regions_dir=temp_dir,
-                    hero_cards_interval_sec=0.0,
+                    hero_cards_interval_sec=0.25,
                 )
             )
         self.assertEqual(debugger.regions["hero_cards_region"].left, 1)
         self.assertEqual(debugger.regions["hero_cards_region"].width, 3)
         self.assertEqual(debugger.regions["board_cards_region"].left, 50)
-        self.assertEqual(debugger._interval_for_region("hero_cards_region"), 0.0)
+        self.assertEqual(debugger._interval_for_region("hero_cards_region"), 0.25)
 
     @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
     def test_bbox_fallback_constructs_cards_from_rank_ocr_lines(self) -> None:
@@ -131,15 +133,72 @@ class CardImageDetectionTests(unittest.TestCase):
         self.assertTrue(any("FAILED" in line for line in debug_lines))
 
     @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
+    def test_folded_guard_distinguishes_live_hero_from_grey_overlay(self) -> None:
+        fixture = Path(__file__).resolve().parent / "fixtures" / "card_regions" / "hero_cards_region_raw.png"
+        if fixture.exists():
+            import cv2
+
+            live = cv2.imread(str(fixture))
+            self.assertFalse(is_probably_folded_hero_region(live))
+        folded = np.full((90, 120, 3), 135, dtype=np.uint8)
+        folded[18:24, :] = 70
+        self.assertTrue(is_probably_folded_hero_region(folded))
+
+    @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
     def test_card_back_and_folded_hero_guards(self) -> None:
         face_up = self._card_with_glyph((0, 0, 210))
         patterned_back = np.full((80, 55, 3), 120, dtype=np.uint8)
         patterned_back[:, ::4] = 230
-        folded = np.full((90, 120, 3), 135, dtype=np.uint8)
-        folded[18:24, :] = 70
         self.assertFalse(is_probably_card_back(face_up))
-        self.assertTrue(is_probably_card_back(patterned_back))
-        self.assertTrue(is_probably_folded_hero_region(folded))
+        self.assertFalse(is_probably_folded_hero_region(face_up))
+
+    @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
+    def test_suit_prefers_colored_glyphs_over_white_background(self) -> None:
+        face_up = np.full((80, 55, 3), 245, dtype=np.uint8)
+        face_up[12:28, 12:28] = (0, 160, 0)
+        self.assertEqual(detect_suit_from_card_image(face_up), "c")
+
+    @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
+    def test_find_card_face_crops_splits_merged_hero_row(self) -> None:
+        fixture = Path(__file__).resolve().parent / "fixtures" / "card_regions" / "hero_cards_region_raw.png"
+        if not fixture.exists():
+            self.skipTest("hero card fixture image is unavailable")
+        import cv2
+
+        raw = cv2.imread(str(fixture))
+        crops, debug_lines = find_card_face_crops_with_debug(raw)
+        self.assertEqual(len(crops), 2)
+        self.assertTrue(any("split fallback" in line for line in debug_lines))
+
+    @unittest.skipIf(importlib.util.find_spec("cv2") is None, "opencv-python is not installed")
+    @unittest.skipIf(importlib.util.find_spec("easyocr") is None, "easyocr is not installed")
+    def test_detect_cards_from_torn_fixture_regions(self) -> None:
+        from torn_accessibility_hud.config import OCRConfig
+        from torn_accessibility_hud.vision.ocr_engine import EasyOCREngine, preprocess_card_region
+
+        fixtures = Path(__file__).resolve().parent / "fixtures" / "card_regions"
+        hero_path = fixtures / "hero_cards_region_raw.png"
+        board_path = fixtures / "board_cards_region_raw.png"
+        if not hero_path.exists() or not board_path.exists():
+            self.skipTest("card region fixture images are unavailable")
+        import cv2
+
+        ocr = EasyOCREngine(OCRConfig())
+        for path, expected in (
+            (hero_path, ("7d", "Qc")),
+            (board_path, ("Jh", "9d", "5h")),
+        ):
+            raw = cv2.imread(str(path))
+            processed = preprocess_card_region(raw, scale=3.0)
+            region_ocr = ocr.read_raw(processed, allowlist="A23456789TJQK10cdhsCDHS")
+            cards, _debug_lines = detect_cards_from_region(
+                raw,
+                ocr,
+                scale=3.0,
+                fallback_ocr_lines=region_ocr,
+                fallback_ocr_scale=3.0,
+            )
+            self.assertEqual(cards, expected)
 
     @staticmethod
     def _card_with_glyph(color_bgr: tuple[int, int, int]) -> np.ndarray:

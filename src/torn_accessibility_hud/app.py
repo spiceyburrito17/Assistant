@@ -17,7 +17,7 @@ debug_log("app module import started")
 debug_log("app module importing internal components")
 
 from .config import AppConfig, write_default_config
-from .models import ActionType, EquityRequest, EquityResult, GameSnapshot, OCRBatch, OverlayState, ParsedEvent
+from .models import ActionType, EquityRequest, EquityResult, GameSnapshot, OCRBatch, OverlayState, ParsedEvent, Street
 from .parsing.log_parser import ActionLogParser
 from .poker.equity import EquityWorker
 from .state import StickyCardCache
@@ -55,7 +55,15 @@ class SnapshotBuilder:
 
     def _apply_event(self, event: ParsedEvent) -> None:
         if event.action is ActionType.DEALT_HERO:
-            self.snapshot = GameSnapshot(hero_cards=event.cards, generation=self.snapshot.generation)
+            if event.cards == self.snapshot.hero_cards:
+                return
+            self.snapshot = replace(
+                self.snapshot,
+                hero_cards=event.cards,
+                board_cards=(),
+                street=Street.PREFLOP,
+                generation=self.snapshot.generation + 1,
+            )
             return
         if event.action is ActionType.BOARD:
             board = self._merge_board_cards(event.cards)
@@ -103,7 +111,10 @@ class CoordinatorWorker(threading.Thread):
         self.parser = ActionLogParser(config.parser)
         self.ledger = OpponentLedger()
         self.builder = SnapshotBuilder(self.ledger)
-        self.card_cache = StickyCardCache(max_missing_frames=15)
+        self.card_cache = StickyCardCache(
+            max_missing_scans=config.ocr.card_cache_max_missing_scans,
+        )
+        self._last_published: OverlayState | None = None
         self.recommendations = RecommendationEngine()
         self.latest_lines: tuple[str, ...] = ()
         self.latest_equity: EquityResult | None = None
@@ -135,7 +146,13 @@ class CoordinatorWorker(threading.Thread):
         if events:
             self.ledger.process_events(events)
             self.builder.apply_events(events)
-        snapshot, cache_changed = self.card_cache.apply(self.builder.snapshot, events)
+        snapshot, cache_changed = self.card_cache.apply(
+            self.builder.snapshot,
+            events,
+            hero_region_folded=latest.hero_region_folded,
+            hero_cards_scanned=latest.hero_cards_scanned,
+            board_cards_scanned=latest.board_cards_scanned,
+        )
         if cache_changed:
             self.builder.snapshot = snapshot
 
@@ -170,14 +187,26 @@ class CoordinatorWorker(threading.Thread):
         diagnostics = {}
         if self.equity_worker.last_error:
             diagnostics["equity_error"] = self.equity_worker.last_error
-        self.overlay.publish(
-            OverlayState(
-                snapshot=snapshot,
-                recommendation=recommendation,
-                latest_lines=self.latest_lines,
-                equity_result=self.latest_equity,
-                diagnostics=diagnostics,
-            )
+        state = OverlayState(
+            snapshot=snapshot,
+            recommendation=recommendation,
+            latest_lines=self.latest_lines,
+            equity_result=self.latest_equity,
+            diagnostics=diagnostics,
+        )
+        if self._last_published is not None and self._overlay_state_unchanged(self._last_published, state):
+            return
+        self._last_published = state
+        self.overlay.publish(state)
+
+    @staticmethod
+    def _overlay_state_unchanged(previous: OverlayState, current: OverlayState) -> bool:
+        return (
+            previous.snapshot == current.snapshot
+            and previous.recommendation == current.recommendation
+            and previous.latest_lines == current.latest_lines
+            and previous.equity_result == current.equity_result
+            and dict(previous.diagnostics) == dict(current.diagnostics)
         )
 
 
