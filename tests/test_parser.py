@@ -43,20 +43,21 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(event.street, Street.FLOP)
         self.assertEqual(event.cards, ("As", "Kd", "2c"))
 
-    def test_pot_amount_corrects_dollar_sign_ocr_artifact(self) -> None:
+    def test_pot_amount_keeps_literal_three_digit_values(self) -> None:
         parser = ActionLogParser()
         event = parser.parse_line(OCRLine("POT: 545", 0.94))
         self.assertIsNotNone(event)
         assert event is not None
         self.assertEqual(event.action, ActionType.POT)
-        self.assertEqual(event.amount, 55.0)
+        self.assertEqual(event.amount, 545.0)
 
-    def test_pot_amount_keeps_normal_three_digit_values(self) -> None:
+    def test_pot_amount_corrects_misread_dollar_prefix(self) -> None:
         parser = ActionLogParser()
-        event = parser.parse_line(OCRLine("POT: 675", 0.94))
+        event = parser.parse_line(OCRLine("POT: 5660", 0.94))
         self.assertIsNotNone(event)
         assert event is not None
-        self.assertEqual(event.amount, 675.0)
+        self.assertEqual(event.action, ActionType.POT)
+        self.assertEqual(event.amount, 660.0)
 
 
 if __name__ == "__main__":

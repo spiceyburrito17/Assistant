@@ -100,7 +100,9 @@ class TableRegionReader:
                 debug_lines = (
                     f"=== pot OCR frame {frame_id:06d} region=pot_region ===",
                     f"allowlist={allowlist!r}",
-                    f"pot_raw={combined_text!r}",
+                    f"pot_crop_text={combined_text!r}",
+                    f"pot_anchor_index={pot_parse.pot_anchor_index!r}",
+                    f"pot_digits_start={pot_parse.pot_digits_start!r}",
                     f"pot_candidate={pot_parse.candidate!r}",
                     f"pot_normalized={pot_parse.normalized!r}",
                     f"parse_status={pot_parse.status}",
@@ -116,6 +118,8 @@ class TableRegionReader:
                 allowlist=allowlist,
                 pot_candidate=pot_parse.candidate,
                 parse_status=pot_parse.status,
+                pot_anchor_index=pot_parse.pot_anchor_index,
+                pot_digits_start=pot_parse.pot_digits_start,
             )
         except Exception as exc:  # noqa: BLE001
             self.last_error = f"pot_region OCR failed: {type(exc).__name__}: {exc}"

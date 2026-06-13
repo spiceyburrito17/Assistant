@@ -289,6 +289,9 @@ class TrustedTableStateManager:
             self._board_missing_scans = 0
 
         pot_raw: str | None = self._trusted.parse_diagnostics.pot_raw if self._trusted.parse_diagnostics else None
+        pot_crop_text: str | None = pot_raw
+        pot_anchor_index: int | None = None
+        pot_digits_start: int | None = None
         pot_candidate: str | None = None
         pot_normalized: float | None = pot_size
         pot_rejected_reason: str | None = None
@@ -315,7 +318,10 @@ class TrustedTableStateManager:
 
         if table_ocr is not None and table_ocr.pot is not None:
             pot_raw = table_ocr.pot.raw_text or pot_raw
+            pot_crop_text = pot_raw
             pot_candidate = table_ocr.pot.pot_candidate
+            pot_anchor_index = table_ocr.pot.pot_anchor_index
+            pot_digits_start = table_ocr.pot.pot_digits_start
             if table_ocr.pot.parsed_amount is not None and table_ocr.pot.parsed_amount > 0:
                 accepted, reject_reason = validate_pot_update(
                     table_ocr.pot.parsed_amount,
@@ -419,6 +425,9 @@ class TrustedTableStateManager:
         )
         parse_diagnostics = TableParseDiagnostics(
             pot_raw=pot_raw,
+            pot_crop_text=pot_crop_text,
+            pot_anchor_index=pot_anchor_index,
+            pot_digits_start=pot_digits_start,
             pot_candidate=pot_candidate,
             pot_parsed=pot_normalized if pot_normalized and pot_normalized > 0 else None,
             pot_normalized=pot_normalized if pot_normalized and pot_normalized > 0 else None,

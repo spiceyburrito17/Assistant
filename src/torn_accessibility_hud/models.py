@@ -99,6 +99,8 @@ class PotOCRResult:
     allowlist: str
     pot_candidate: str | None = None
     parse_status: str = ""
+    pot_anchor_index: int | None = None
+    pot_digits_start: int | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,9 @@ class TableOCRResult:
 @dataclass(frozen=True)
 class TableParseDiagnostics:
     pot_raw: str | None = None
+    pot_crop_text: str | None = None
+    pot_anchor_index: int | None = None
+    pot_digits_start: int | None = None
     pot_candidate: str | None = None
     pot_parsed: float | None = None
     pot_normalized: float | None = None

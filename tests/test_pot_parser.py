@@ -7,17 +7,17 @@ from torn_accessibility_hud.state import TrustedTableStateManager
 
 
 class PotParserTests(unittest.TestCase):
-    def test_pot_dollar_540(self) -> None:
-        amount, status = parse_pot_text("POT: $540")
-        self.assertEqual(amount, 540.0)
+    def test_pot_dollar_660(self) -> None:
+        amount, status = parse_pot_text("POT: $660")
+        self.assertEqual(amount, 660.0)
         self.assertEqual(status, "ok")
 
-    def test_misread_dollar_as_leading_five(self) -> None:
-        amount, status = parse_pot_text("POT: 5540")
-        self.assertEqual(amount, 540.0)
-        self.assertEqual(status, "leading_5_as_dollar")
+    def test_misread_dollar_as_prefix_five(self) -> None:
+        amount, status = parse_pot_text("POT: 5660")
+        self.assertEqual(amount, 660.0)
+        self.assertEqual(status, "ok")
 
-    def test_plain_540_without_dollar(self) -> None:
+    def test_plain_three_digit_pot_without_prefix_skip(self) -> None:
         amount, status = parse_pot_text("POT: 540")
         self.assertEqual(amount, 540.0)
         self.assertEqual(status, "ok")
@@ -27,24 +27,31 @@ class PotParserTests(unittest.TestCase):
         self.assertEqual(amount, 2400.0)
         self.assertEqual(status, "ok")
 
-    def test_ignores_junk_after_first_token(self) -> None:
+    def test_ignores_junk_after_first_amount(self) -> None:
         result = parse_pot_text_detailed("POT: $2,4008281400")
-        self.assertEqual(result.candidate, "$2,400")
+        self.assertEqual(result.candidate, "2,400")
         self.assertEqual(result.normalized, 2400.0)
-
-    def test_middle_four_correction(self) -> None:
-        amount, status = parse_pot_text("POT: 545")
-        self.assertEqual(amount, 55.0)
-        self.assertEqual(status, "middle_4_as_dollar")
 
     def test_keeps_normal_three_digit_pot(self) -> None:
         amount, status = parse_pot_text("POT: 675")
         self.assertEqual(amount, 675.0)
         self.assertEqual(status, "ok")
 
-    def test_pot_region_fallback_without_label(self) -> None:
-        result = parse_pot_region_text("5540")
-        self.assertEqual(result.normalized, 540.0)
+    def test_prefix_debug_indices(self) -> None:
+        result = parse_pot_text_detailed("POT: 5660")
+        self.assertEqual(result.pot_anchor_index, 0)
+        self.assertEqual(result.pot_digits_start, 6)
+        self.assertEqual(result.candidate, "660")
+
+    def test_no_pot_marker_rejects(self) -> None:
+        result = parse_pot_region_text("5660")
+        self.assertIsNone(result.normalized)
+        self.assertEqual(result.status, "no_pot_marker")
+
+    def test_does_not_fabricate_middle_four_correction(self) -> None:
+        amount, status = parse_pot_text("POT: 545")
+        self.assertEqual(amount, 545.0)
+        self.assertEqual(status, "ok")
 
 
 class PotSanityTests(unittest.TestCase):
@@ -77,7 +84,7 @@ class TrustedPotSanityTests(unittest.TestCase):
                     parsed_amount=540.0,
                     ocr_confidence=0.9,
                     allowlist="$",
-                    pot_candidate="$540",
+                    pot_candidate="540",
                     parse_status="ok",
                 ),
                 pot_region_scanned=True,
@@ -93,7 +100,7 @@ class TrustedPotSanityTests(unittest.TestCase):
                     parsed_amount=2400.0,
                     ocr_confidence=0.9,
                     allowlist="$",
-                    pot_candidate="$2,400",
+                    pot_candidate="2,400",
                     parse_status="ok",
                 ),
                 pot_region_scanned=True,

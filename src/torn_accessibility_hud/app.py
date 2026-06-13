@@ -195,7 +195,13 @@ class CoordinatorWorker(threading.Thread):
             "solver_status": recommendation.solver_status.value,
         }
         if parse_diag is not None:
-            diagnostics["pot_raw"] = parse_diag.pot_raw or "--"
+            diagnostics["pot_crop_text"] = parse_diag.pot_crop_text or parse_diag.pot_raw or "--"
+            diagnostics["pot_anchor_index"] = (
+                str(parse_diag.pot_anchor_index) if parse_diag.pot_anchor_index is not None else "--"
+            )
+            diagnostics["pot_digits_start"] = (
+                str(parse_diag.pot_digits_start) if parse_diag.pot_digits_start is not None else "--"
+            )
             diagnostics["pot_candidate"] = parse_diag.pot_candidate or "--"
             diagnostics["pot_normalized"] = (
                 f"{parse_diag.pot_normalized:,.0f}"

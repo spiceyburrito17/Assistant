@@ -168,7 +168,14 @@ class TkOverlay:
             summary_lines.append(f"Notes:      {', '.join(recommendation.confidence_notes)}")
         parse_diag = recommendation.parse_diagnostics or state.snapshot.parse_diagnostics
         if parse_diag is not None:
-            summary_lines.append(f"pot_raw={parse_diag.pot_raw or '--'}")
+            crop_text = parse_diag.pot_crop_text or parse_diag.pot_raw or "--"
+            summary_lines.append(f"pot_crop_text={crop_text}")
+            summary_lines.append(
+                f"pot_anchor_index={parse_diag.pot_anchor_index if parse_diag.pot_anchor_index is not None else '--'}"
+            )
+            summary_lines.append(
+                f"pot_digits_start={parse_diag.pot_digits_start if parse_diag.pot_digits_start is not None else '--'}"
+            )
             summary_lines.append(f"pot_candidate={parse_diag.pot_candidate or '--'}")
             parsed_pot = (
                 f"{parse_diag.pot_normalized:,.0f}"
