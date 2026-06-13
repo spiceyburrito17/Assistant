@@ -1,26 +1,26 @@
 {
   "log_region": {
-    "left": -1159,
-    "top": 131,
+    "left": -1158,
+    "top": 100,
     "width": 396,
     "height": 176
   },
   "hero_cards_region": {
-    "left": -1001,
-    "top": 656,
-    "width": 178,
-    "height": 127
+    "left": -999,
+    "top": 625,
+    "width": 174,
+    "height": 126
   },
   "board_cards_region": {
-    "left": -1200,
-    "top": 370,
-    "width": 484,
-    "height": 124
+    "left": -1201,
+    "top": 338,
+    "width": 485,
+    "height": 125
   },
   "stack_region": {
-    "left": -1048,
-    "top": 814,
-    "width": 178,
-    "height": 22
+    "left": -1041,
+    "top": 784,
+    "width": 167,
+    "height": 21
   }
 }
