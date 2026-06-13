@@ -122,7 +122,7 @@ class GameSnapshot:
 class EquityResult:
     """Monte Carlo equity result returned by the background worker."""
 
-    hero_equity: float
+    hero_equity: float | None
     tie_rate: float
     simulations: int
     generation: int

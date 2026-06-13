@@ -32,6 +32,13 @@ class RecommendationEngine:
                 color_hex=self.COLORS[RecommendationLevel.WAIT],
             )
         if result.warning and result.simulations == 0:
+            if result.hero_equity is None:
+                return Recommendation(
+                    level=RecommendationLevel.CAUTION,
+                    title="DEALING",
+                    detail=result.warning,
+                    color_hex=self.COLORS[RecommendationLevel.CAUTION],
+                )
             return Recommendation(
                 level=RecommendationLevel.UNKNOWN,
                 title="UNKNOWN",
@@ -40,6 +47,13 @@ class RecommendationEngine:
             )
 
         equity = result.hero_equity
+        if equity is None:
+            return Recommendation(
+                level=RecommendationLevel.CAUTION,
+                title="WAITING",
+                detail=result.warning or "Equity is temporarily unavailable.",
+                color_hex=self.COLORS[RecommendationLevel.CAUTION],
+            )
         pot_odds = self._pot_odds(snapshot)
         edge = equity - pot_odds
         if snapshot.to_call <= 0:

@@ -20,6 +20,7 @@ from .config import AppConfig, write_default_config
 from .models import ActionType, EquityRequest, EquityResult, GameSnapshot, OCRBatch, OverlayState, ParsedEvent
 from .parsing.log_parser import ActionLogParser
 from .poker.equity import EquityWorker
+from .state import StickyCardCache
 from .tracking.ledger import OpponentLedger
 debug_log("app module importing TkOverlay")
 from .ui.overlay import TkOverlay
@@ -102,6 +103,7 @@ class CoordinatorWorker(threading.Thread):
         self.parser = ActionLogParser(config.parser)
         self.ledger = OpponentLedger()
         self.builder = SnapshotBuilder(self.ledger)
+        self.card_cache = StickyCardCache(max_missing_frames=15)
         self.recommendations = RecommendationEngine()
         self.latest_lines: tuple[str, ...] = ()
         self.latest_equity: EquityResult | None = None
@@ -130,10 +132,12 @@ class CoordinatorWorker(threading.Thread):
             return
         self.latest_lines = tuple(line.text for line in latest.lines)
         events = self.parser.parse_lines(latest.lines)
-        if not events:
-            return
-        self.ledger.process_events(events)
-        self.builder.apply_events(events)
+        if events:
+            self.ledger.process_events(events)
+            self.builder.apply_events(events)
+        snapshot, cache_changed = self.card_cache.apply(self.builder.snapshot, events)
+        if cache_changed:
+            self.builder.snapshot = snapshot
 
     def _drain_equity(self) -> None:
         while True:

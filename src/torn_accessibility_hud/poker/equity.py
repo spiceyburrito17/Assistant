@@ -27,7 +27,12 @@ class MonteCarloEquityCalculator:
         timeout_ms: int,
     ) -> EquityResult:
         started = time.monotonic()
-        if not snapshot.has_minimum_equity_inputs:
+        board_count = len(snapshot.board_cards)
+        if board_count in {1, 2}:
+            return EquityResult(None, 0.0, 0, snapshot.generation, 0.0, "Awaiting Full Flop")
+        if board_count > 5:
+            return EquityResult(None, 0.0, 0, snapshot.generation, 0.0, "Invalid board card count")
+        if len(snapshot.hero_cards) != 2:
             return EquityResult(0.0, 0.0, 0, snapshot.generation, 0.0, "hero cards missing")
         visible_cards = tuple(snapshot.hero_cards) + tuple(snapshot.board_cards)
         dead_cards = set(visible_cards)
@@ -37,57 +42,61 @@ class MonteCarloEquityCalculator:
         if not opponents:
             return EquityResult(1.0, 0.0, 0, snapshot.generation, 0.0, "no active opponents")
 
-        from treys import Card, Evaluator
+        try:
+            from treys import Card, Evaluator
 
-        evaluator = Evaluator()
-        rng_seed = self.seed if self.seed is not None else time.time_ns()
-        rng = random.Random(rng_seed + snapshot.generation)
-        hero_cards = [Card.new(card) for card in snapshot.hero_cards]
-        board_cards = list(snapshot.board_cards)
-        wins = 0.0
-        ties = 0
-        completed = 0
-        warning: str | None = None
-        matrices = {
-            name: RangeMatrix.from_weights(opponent_range_weights.get(name, {})) for name in opponents
-        }
+            evaluator = Evaluator()
+            rng_seed = self.seed if self.seed is not None else time.time_ns()
+            rng = random.Random(rng_seed + snapshot.generation)
+            hero_cards = [Card.new(card) for card in snapshot.hero_cards]
+            board_cards = list(snapshot.board_cards)
+            wins = 0.0
+            ties = 0
+            completed = 0
+            warning: str | None = None
+            matrices = {
+                name: RangeMatrix.from_weights(opponent_range_weights.get(name, {})) for name in opponents
+            }
 
-        for _ in range(max(simulations, 1)):
-            if (time.monotonic() - started) * 1000.0 >= timeout_ms and completed > 0:
-                warning = "simulation budget hit timeout"
-                break
-            excluded = set(dead_cards)
-            opponent_hands: list[tuple[str, str]] = []
-            for name in opponents:
-                combo = matrices[name].sample_combo(excluded, rng)
-                if combo is None:
-                    warning = f"not enough cards to sample {name}"
+            for _ in range(max(simulations, 1)):
+                if (time.monotonic() - started) * 1000.0 >= timeout_ms and completed > 0:
+                    warning = "simulation budget hit timeout"
                     break
-                opponent_hands.append(combo)
-                excluded.update(combo)
-            if warning and len(opponent_hands) != len(opponents):
-                break
+                excluded = set(dead_cards)
+                opponent_hands: list[tuple[str, str]] = []
+                for name in opponents:
+                    combo = matrices[name].sample_combo(excluded, rng)
+                    if combo is None:
+                        warning = f"not enough cards to sample {name}"
+                        break
+                    opponent_hands.append(combo)
+                    excluded.update(combo)
+                if warning and len(opponent_hands) != len(opponents):
+                    break
 
-            runout = list(board_cards)
-            needed = 5 - len(runout)
-            deck = [card for card in FULL_DECK if card not in excluded]
-            if needed < 0 or len(deck) < needed:
-                warning = "invalid board/deck state"
-                break
-            runout.extend(rng.sample(deck, needed))
-            treys_board = [Card.new(card) for card in runout]
-            hero_score = evaluator.evaluate(treys_board, hero_cards)
-            opponent_scores = [
-                evaluator.evaluate(treys_board, [Card.new(first), Card.new(second)])
-                for first, second in opponent_hands
-            ]
-            best_score = min([hero_score, *opponent_scores])
-            if hero_score == best_score:
-                tied_winners = 1 + sum(score == best_score for score in opponent_scores)
-                wins += 1.0 / tied_winners
-                if tied_winners > 1:
-                    ties += 1
-            completed += 1
+                runout = list(board_cards)
+                needed = 5 - len(runout)
+                deck = [card for card in FULL_DECK if card not in excluded]
+                if needed < 0 or len(deck) < needed:
+                    warning = "invalid board/deck state"
+                    break
+                runout.extend(rng.sample(deck, needed))
+                treys_board = [Card.new(card) for card in runout]
+                hero_score = evaluator.evaluate(treys_board, hero_cards)
+                opponent_scores = [
+                    evaluator.evaluate(treys_board, [Card.new(first), Card.new(second)])
+                    for first, second in opponent_hands
+                ]
+                best_score = min([hero_score, *opponent_scores])
+                if hero_score == best_score:
+                    tied_winners = 1 + sum(score == best_score for score in opponent_scores)
+                    wins += 1.0 / tied_winners
+                    if tied_winners > 1:
+                        ties += 1
+                completed += 1
+        except Exception as exc:  # noqa: BLE001 - keep Treys errors from killing the worker
+            elapsed_ms = (time.monotonic() - started) * 1000.0
+            return EquityResult(None, 0.0, 0, snapshot.generation, elapsed_ms, f"Equity unavailable: {exc}")
 
         elapsed_ms = (time.monotonic() - started) * 1000.0
         if completed == 0:
