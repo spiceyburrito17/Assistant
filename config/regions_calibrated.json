@@ -1,56 +1,50 @@
 {
   "log_region": {
-    "left": -1160,
+    "left": -1158,
     "top": 100,
-    "width": 401,
-    "height": 197
+    "width": 396,
+    "height": 175
   },
   "hero_cards_region": {
     "left": -1001,
-    "top": 625,
-    "width": 177,
-    "height": 128
+    "top": 626,
+    "width": 176,
+    "height": 125
   },
   "board_cards_region": {
-    "left": -1199,
-    "top": 336,
+    "left": -1200,
+    "top": 335,
     "width": 484,
-    "height": 127
+    "height": 128
   },
   "stack_region": {
-    "left": -1040,
+    "left": -1030,
     "top": 783,
-    "width": 163,
-    "height": 24
+    "width": 155,
+    "height": 22
   },
   "pot_region": {
-    "left": -1061,
-    "top": 307,
-    "width": 207,
-    "height": 24
+    "left": -1062,
+    "top": 312,
+    "width": 224,
+    "height": 20
   },
-  "fold_button_region": {
-    "left": -838,
-    "top": 893,
-    "width": 212,
-    "height": 36
+  "action_slot_left": {
+    "left": -1309,
+    "top": 891,
+    "width": 229,
+    "height": 38
   },
-  "check_button_region": {
-    "left": -1071,
-    "top": 894,
-    "width": 440,
-    "height": 36
+  "action_slot_centre": {
+    "left": -1078,
+    "top": 891,
+    "width": 233,
+    "height": 39
   },
-  "call_button_region": {
-    "left": -1305,
-    "top": 894,
-    "width": 458,
-    "height": 33
-  },
-  "raise_button_region": {
-    "left": -1303,
-    "top": 895,
-    "width": 216,
-    "height": 31
+  "action_slot_right": {
+    "left": -844,
+    "top": 891,
+    "width": 230,
+    "height": 40
   }
 }

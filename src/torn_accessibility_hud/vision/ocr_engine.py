@@ -1040,7 +1040,7 @@ class OCRWorker(threading.Thread):
                                     debounce.stable_count,
                                     debounce.motion_score,
                                 )
-                                if card_lines or table_ocr.pot is not None or table_ocr.buttons:
+                                if card_lines or table_ocr.pot is not None or table_ocr.slots:
                                     self._put_latest(
                                         OCRBatch(
                                             lines=card_lines,

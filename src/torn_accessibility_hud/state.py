@@ -8,7 +8,6 @@ from dataclasses import dataclass, replace
 from .diagnostics import debug_log
 from .models import (
     ActionType,
-    ButtonOCRResult,
     GameSnapshot,
     ParsedEvent,
     RecommendedAction,
@@ -17,14 +16,10 @@ from .models import (
     TableParseDiagnostics,
     TableStateConfidence,
 )
-from .parsing.action_validator import validate_action_inputs
+from .parsing.action_slots import parse_action_bar
 from .parsing.amounts import parse_amount_to_call_from_action_text
 from .parsing.pot_sanity import validate_pot_update
-from .parsing.legal_actions import (
-    allowed_labels_for_region,
-    collect_legal_actions_from_lines,
-    legal_action_to_recommended,
-)
+from .parsing.legal_actions import collect_legal_actions_from_lines
 
 
 class CardReadStabilizer:
@@ -375,51 +370,63 @@ class TrustedTableStateManager:
                     pot_size = previous_pot if not hand_reset else None
                     pot_normalized = pot_size
 
-        legal_actions, legal_actions_raw, legal_actions_normalized, actions_ambiguous = (
-            self._resolve_legal_actions(table_ocr, ocr_lines)
-        )
+        slot_left_raw = slot_centre_raw = slot_right_raw = ""
+        slot_left_coords = slot_centre_coords = slot_right_coords = None
+        post_hand_ui = False
+        legal_actions: tuple[RecommendedAction, ...] = ()
+        legal_actions_raw: tuple[str, ...] = ()
+        legal_actions_normalized: tuple[str, ...] = ()
+        actions_ambiguous = False
         amount_to_call_raw: str | None = None
         amount_to_call_parsed: float | None = None
         action_block_reason: str | None = None
-        fold_button_raw, raise_button_raw, button_overlap_suspected = self._button_region_diagnostics(
-            table_ocr
-        )
-        call_button_raw = self._call_button_raw_text(table_ocr)
-        if table_ocr is not None and table_ocr.action_regions_scanned:
-            validated = validate_action_inputs(
-                normalized_labels=legal_actions_normalized,
-                raw_entries=legal_actions_raw,
-                actions_ambiguous=actions_ambiguous,
-                call_button_raw=call_button_raw,
-                raise_button_raw=raise_button_raw,
-                action_regions_scanned=True,
-            )
-            legal_actions = validated.legal_actions
-            legal_actions_normalized = validated.normalized_labels
-            actions_ambiguous = validated.actions_ambiguous
-            amount_to_call_raw = validated.amount_to_call.raw_text
-            amount_to_call_parsed = validated.amount_to_call.parsed
-            action_block_reason = validated.block_reason
-            if validated.to_call is not None:
-                to_call = validated.to_call
-            elif RecommendedAction.CHECK in legal_actions and RecommendedAction.CALL not in legal_actions:
-                to_call = 0.0
-        elif legal_actions:
-            self._legal_actions_seen_at = now
-        elif self._legal_actions_seen_at > 0.0 and now - self._legal_actions_seen_at <= self.legal_actions_grace_sec:
-            legal_actions = self._trusted.legal_actions
-            if self._trusted.parse_diagnostics is not None:
-                legal_actions_raw = self._trusted.parse_diagnostics.legal_actions_raw
-                legal_actions_normalized = self._trusted.parse_diagnostics.legal_actions_normalized
-                amount_to_call_raw = self._trusted.parse_diagnostics.amount_to_call_raw
-                amount_to_call_parsed = self._trusted.parse_diagnostics.amount_to_call_parsed
-            actions_ambiguous = self._trusted.actions_ambiguous
-            if self._trusted.to_call is not None:
-                to_call = self._trusted.to_call
+
+        if table_ocr is not None and table_ocr.action_regions_scanned and table_ocr.slots:
+            parsed_bar = parse_action_bar(table_ocr)
+            slot_left_raw = parsed_bar.slot_left_raw
+            slot_centre_raw = parsed_bar.slot_centre_raw
+            slot_right_raw = parsed_bar.slot_right_raw
+            slot_left_coords = parsed_bar.slot_left_coords
+            slot_centre_coords = parsed_bar.slot_centre_coords
+            slot_right_coords = parsed_bar.slot_right_coords
+            post_hand_ui = parsed_bar.post_hand_ui
+            if post_hand_ui:
+                legal_actions = ()
+                legal_actions_raw = ()
+                legal_actions_normalized = ()
+                action_block_reason = "post_hand"
+            else:
+                legal_actions = parsed_bar.legal_actions
+                legal_actions_raw = parsed_bar.legal_actions_raw
+                legal_actions_normalized = parsed_bar.legal_actions_normalized
+                actions_ambiguous = parsed_bar.actions_ambiguous
+                amount_to_call_raw = parsed_bar.amount_to_call_raw
+                amount_to_call_parsed = parsed_bar.amount_to_call_parsed
+                action_block_reason = parsed_bar.block_reason
+                if amount_to_call_parsed is not None:
+                    to_call = amount_to_call_parsed
+                elif RecommendedAction.CHECK in legal_actions and RecommendedAction.CALL not in legal_actions:
+                    to_call = 0.0
         else:
-            legal_actions = ()
-            legal_actions_raw = ()
-            legal_actions_normalized = ()
+            legal_actions, legal_actions_raw, legal_actions_normalized, actions_ambiguous = (
+                collect_legal_actions_from_lines(ocr_lines)
+            )
+            if legal_actions:
+                self._legal_actions_seen_at = now
+            elif self._legal_actions_seen_at > 0.0 and now - self._legal_actions_seen_at <= self.legal_actions_grace_sec:
+                legal_actions = self._trusted.legal_actions
+                if self._trusted.parse_diagnostics is not None:
+                    legal_actions_raw = self._trusted.parse_diagnostics.legal_actions_raw
+                    legal_actions_normalized = self._trusted.parse_diagnostics.legal_actions_normalized
+                    amount_to_call_raw = self._trusted.parse_diagnostics.amount_to_call_raw
+                    amount_to_call_parsed = self._trusted.parse_diagnostics.amount_to_call_parsed
+                actions_ambiguous = self._trusted.actions_ambiguous
+                if self._trusted.to_call is not None:
+                    to_call = self._trusted.to_call
+            else:
+                legal_actions = ()
+                legal_actions_raw = ()
+                legal_actions_normalized = ()
 
         if legal_actions and table_ocr is not None and table_ocr.action_regions_scanned:
             self._legal_actions_seen_at = now
@@ -501,10 +508,13 @@ class TrustedTableStateManager:
             legal_actions_normalized=legal_actions_normalized,
             amount_to_call_raw=amount_to_call_raw,
             amount_to_call_parsed=amount_to_call_parsed,
-            fold_button_raw=fold_button_raw,
-            call_button_raw=call_button_raw,
-            raise_button_raw=raise_button_raw,
-            button_overlap_suspected=button_overlap_suspected,
+            slot_left_raw=slot_left_raw or None,
+            slot_centre_raw=slot_centre_raw or None,
+            slot_right_raw=slot_right_raw or None,
+            slot_left_coords=slot_left_coords,
+            slot_centre_coords=slot_centre_coords,
+            slot_right_coords=slot_right_coords,
+            post_hand_ui=post_hand_ui,
             actions_ambiguous=actions_ambiguous,
             block_reason=block_reason,
         )
@@ -522,88 +532,6 @@ class TrustedTableStateManager:
             parse_diagnostics=parse_diagnostics,
         )
         return self._trusted, self._trusted.to_snapshot(raw)
-
-    @staticmethod
-    def _resolve_legal_actions(
-        table_ocr: TableOCRResult | None,
-        ocr_lines: tuple[str, ...],
-    ) -> tuple[tuple[RecommendedAction, ...], tuple[str, ...], tuple[str, ...], bool]:
-        if table_ocr is not None and table_ocr.buttons:
-            return TrustedTableStateManager._actions_from_button_regions(table_ocr.buttons)
-        return collect_legal_actions_from_lines(ocr_lines)
-
-    @staticmethod
-    def _actions_from_button_regions(
-        buttons: tuple[ButtonOCRResult, ...],
-    ) -> tuple[tuple[RecommendedAction, ...], tuple[str, ...], tuple[str, ...], bool]:
-        merged: list[RecommendedAction] = []
-        raw_texts: list[str] = []
-        normalized: list[str] = []
-        seen: set[RecommendedAction] = set()
-        ambiguous = False
-        for button in buttons:
-            if button.raw_text:
-                raw_texts.append(f"{button.region_name}={button.raw_text!r}")
-            if button.ambiguous:
-                ambiguous = True
-                continue
-            allowed = set(allowed_labels_for_region(button.region_name))
-            labels = button.detected_labels or (
-                (button.normalized_label,) if button.normalized_label else ()
-            )
-            if not labels:
-                continue
-            for label in labels:
-                if label not in allowed:
-                    continue
-                normalized.append(label)
-                recommended = legal_action_to_recommended(label)
-                if recommended in seen:
-                    continue
-                merged.append(recommended)
-                seen.add(recommended)
-        return tuple(merged), tuple(raw_texts), tuple(normalized), ambiguous
-
-    @staticmethod
-    def _call_button_raw_text(table_ocr: TableOCRResult | None) -> str | None:
-        if table_ocr is None:
-            return None
-        for button in table_ocr.buttons:
-            if button.region_name == "call_button_region" and button.raw_text:
-                return button.raw_text
-        return None
-
-    @staticmethod
-    def _button_region_diagnostics(
-        table_ocr: TableOCRResult | None,
-    ) -> tuple[str | None, str | None, str | None]:
-        from .parsing.amounts import button_texts_overlap
-
-        if table_ocr is None:
-            return None, None, None
-        fold_raw = call_raw = raise_raw = None
-        for button in table_ocr.buttons:
-            if button.region_name == "fold_button_region":
-                fold_raw = button.raw_text or None
-            elif button.region_name == "call_button_region":
-                call_raw = button.raw_text or None
-            elif button.region_name == "raise_button_region":
-                raise_raw = button.raw_text or None
-
-        suspects: list[str] = []
-        pairs = (
-            ("fold_button_region", fold_raw),
-            ("call_button_region", call_raw),
-            ("raise_button_region", raise_raw),
-        )
-        for index, (left_name, left_text) in enumerate(pairs):
-            if not left_text:
-                continue
-            for right_name, right_text in pairs[index + 1 :]:
-                if right_text and button_texts_overlap(left_text, right_text):
-                    suspects.append(f"{left_name}~{right_name}")
-        overlap = ",".join(suspects) if suspects else None
-        return fold_raw, raise_raw, overlap
 
     @staticmethod
     def _derive_block_reason(

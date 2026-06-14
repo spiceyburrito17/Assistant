@@ -17,8 +17,8 @@ def classify_solver_status(result: EquityResult, snapshot: GameSnapshot) -> Solv
         return SolverStatus.SKIPPED
     if "timeout" in warning:
         return SolverStatus.TIMEOUT
-    if not snapshot.active_opponents:
-        return SolverStatus.INSUFFICIENT_STATE
+    if result.hero_equity is None and result.simulations <= 0:
+        return SolverStatus.SKIPPED
     return SolverStatus.OK
 
 
@@ -31,7 +31,7 @@ def sanitize_equity_result(result: EquityResult, snapshot: GameSnapshot) -> tupl
     if status is SolverStatus.INSUFFICIENT_STATE:
         hero_equity = None
     elif hero_equity is not None and hero_equity >= 0.999:
-        if status is not SolverStatus.OK or result.simulations < 100 or not snapshot.active_opponents:
+        if status is not SolverStatus.OK or result.simulations < 100:
             hero_equity = None
             status = SolverStatus.INSUFFICIENT_STATE
     elif status is SolverStatus.TIMEOUT:

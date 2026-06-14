@@ -80,7 +80,9 @@ python tools/calibrate_regions.py --monitor-index 2 --output config/regions_cali
 OpenCV will show the screenshot fullscreen on the selected monitor so the OS
 window title bar does not offset the displayed image. Add `--windowed` only if
 you need a normal debug window. Draw rectangles in this order: log, hero cards,
-board cards, stack. Drag a rectangle, press Enter or Space to confirm it, press
+board cards, stack, pot, then the three action-bar slots left-to-right
+(`action_slot_left`, `action_slot_centre`, `action_slot_right`). Each slot box
+should cover exactly one button (~200px wide, ~45px tall). Drag a rectangle,
 `C` to clear the current rectangle, and press `Q` or Esc when you are done. The
 tool converts the screenshot-local rectangles into global screen coordinates
 using the monitor offset, writes the JSON file, and prints the same JSON to

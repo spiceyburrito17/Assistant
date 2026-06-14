@@ -58,7 +58,7 @@ class OCRConfig:
     pot_ocr_allowlist: str = "POT: $0123456789,."
     pot_ocr_interval_sec: float = 0.0
     action_ocr_scale: float = 3.0
-    action_ocr_allowlist: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "
+    action_ocr_allowlist: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz $0123456789,./"
     action_ocr_interval_sec: float = 0.0
 
 
@@ -103,11 +103,9 @@ CALIBRATED_REGION_NAMES = (
     "board_cards_region",
     "stack_region",
     "pot_region",
-    "fold_button_region",
-    "check_button_region",
-    "call_button_region",
-    "raise_button_region",
-    "bet_button_region",
+    "action_slot_left",
+    "action_slot_centre",
+    "action_slot_right",
 )
 
 
@@ -125,11 +123,9 @@ class RegionsConfig:
     board_cards_region: ScreenRegion | None = None
     stack_region: ScreenRegion | None = None
     pot_region: ScreenRegion | None = None
-    fold_button_region: ScreenRegion | None = None
-    check_button_region: ScreenRegion | None = None
-    call_button_region: ScreenRegion | None = None
-    raise_button_region: ScreenRegion | None = None
-    bet_button_region: ScreenRegion | None = None
+    action_slot_left: ScreenRegion | None = None
+    action_slot_centre: ScreenRegion | None = None
+    action_slot_right: ScreenRegion | None = None
     extra_regions: tuple[tuple[str, ScreenRegion], ...] = field(default_factory=tuple)
 
     @classmethod
@@ -155,11 +151,9 @@ class RegionsConfig:
             board_cards_region=known.get("board_cards_region"),
             stack_region=known.get("stack_region"),
             pot_region=known.get("pot_region"),
-            fold_button_region=known.get("fold_button_region"),
-            check_button_region=known.get("check_button_region"),
-            call_button_region=known.get("call_button_region"),
-            raise_button_region=known.get("raise_button_region"),
-            bet_button_region=known.get("bet_button_region"),
+            action_slot_left=known.get("action_slot_left"),
+            action_slot_centre=known.get("action_slot_centre"),
+            action_slot_right=known.get("action_slot_right"),
             extra_regions=extras,
         )
 
@@ -172,11 +166,9 @@ class RegionsConfig:
                 ("board_cards_region", self.board_cards_region),
                 ("stack_region", self.stack_region),
                 ("pot_region", self.pot_region),
-                ("fold_button_region", self.fold_button_region),
-                ("check_button_region", self.check_button_region),
-                ("call_button_region", self.call_button_region),
-                ("raise_button_region", self.raise_button_region),
-                ("bet_button_region", self.bet_button_region),
+                ("action_slot_left", self.action_slot_left),
+                ("action_slot_centre", self.action_slot_centre),
+                ("action_slot_right", self.action_slot_right),
             )
             if region is not None
         }

@@ -172,14 +172,17 @@ class CoordinatorWorker(threading.Thread):
         )
         if snapshot != self.builder.snapshot:
             self.builder.snapshot = snapshot
+            if self.latest_equity is not None and self.latest_equity.generation != snapshot.generation:
+                self.latest_equity = None
 
     def _drain_equity(self) -> None:
+        snapshot_generation = self.builder.snapshot.generation
         while True:
             try:
                 result = self.equity_result_queue.get_nowait()
             except queue.Empty:
                 break
-            if result.generation >= self.builder.snapshot.generation:
+            if result.generation == snapshot_generation:
                 self.latest_equity = result
 
     def _submit_equity_if_needed(self) -> None:
@@ -235,9 +238,13 @@ class CoordinatorWorker(threading.Thread):
                 if parse_diag.amount_to_call_parsed is not None
                 else "--"
             )
-            diagnostics["fold_button_raw"] = parse_diag.fold_button_raw or "--"
-            diagnostics["call_button_raw"] = parse_diag.call_button_raw or "--"
-            diagnostics["raise_button_raw"] = parse_diag.raise_button_raw or "--"
+            diagnostics["slot_left_raw"] = parse_diag.slot_left_raw or "--"
+            diagnostics["slot_centre_raw"] = parse_diag.slot_centre_raw or "--"
+            diagnostics["slot_right_raw"] = parse_diag.slot_right_raw or "--"
+            diagnostics["slot_left_coords"] = parse_diag.slot_left_coords or "--"
+            diagnostics["slot_centre_coords"] = parse_diag.slot_centre_coords or "--"
+            diagnostics["slot_right_coords"] = parse_diag.slot_right_coords or "--"
+            diagnostics["post_hand_ui"] = "true" if parse_diag.post_hand_ui else "false"
             if parse_diag.button_overlap_suspected:
                 diagnostics["button_overlap_suspected"] = parse_diag.button_overlap_suspected
             if parse_diag.block_reason:

@@ -13,6 +13,9 @@ from ..parsing.cards import FULL_DECK, validate_cards
 from ..tracking.range_matrix import RangeMatrix
 
 
+DEFAULT_ANONYMOUS_OPPONENT = "__table_villain__"
+
+
 class MonteCarloEquityCalculator:
     """Synchronous calculator; use EquityWorker for UI-safe execution."""
 
@@ -39,8 +42,10 @@ class MonteCarloEquityCalculator:
         if not validate_cards(visible_cards, max_cards=7):
             return EquityResult(0.0, 0.0, 0, snapshot.generation, 0.0, "invalid or duplicate cards")
         opponents = tuple(snapshot.active_opponents)
+        range_weights: Mapping[str, Mapping[str, float]] = opponent_range_weights
         if not opponents:
-            return EquityResult(None, 0.0, 0, snapshot.generation, 0.0, "insufficient state")
+            opponents = (DEFAULT_ANONYMOUS_OPPONENT,)
+            range_weights = {DEFAULT_ANONYMOUS_OPPONENT: {}}
 
         try:
             from treys import Card, Evaluator
@@ -55,7 +60,7 @@ class MonteCarloEquityCalculator:
             completed = 0
             warning: str | None = None
             matrices = {
-                name: RangeMatrix.from_weights(opponent_range_weights.get(name, {})) for name in opponents
+                name: RangeMatrix.from_weights(range_weights.get(name, {})) for name in opponents
             }
 
             for _ in range(max(simulations, 1)):

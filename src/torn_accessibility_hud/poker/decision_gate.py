@@ -25,6 +25,7 @@ def decision_blocked_reason(
             "hero_cards_unstable",
             "board_unstable",
             "legal_actions_missing",
+            "post_hand",
         }:
             return parse_diag.block_reason
 
@@ -47,6 +48,8 @@ def decision_blocked_reason(
     if solver_status is SolverStatus.INSUFFICIENT_STATE:
         return "insufficient_state"
     if equity_result is None or equity_result.hero_equity is None:
+        if snapshot.state_confidence.value == "high" and parse_diag is not None and not parse_diag.block_reason:
+            return "equity_unavailable"
         return "equity unavailable"
     return None
 

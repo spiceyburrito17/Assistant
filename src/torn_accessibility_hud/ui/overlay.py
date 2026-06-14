@@ -209,9 +209,9 @@ class TkOverlay:
                 else "--"
             )
             summary_lines.append(f"amount_to_call_parsed={parsed_to_call}")
-            summary_lines.append(f"fold_button_raw={parse_diag.fold_button_raw or '--'}")
-            summary_lines.append(f"call_button_raw={parse_diag.call_button_raw or '--'}")
-            summary_lines.append(f"raise_button_raw={parse_diag.raise_button_raw or '--'}")
+            summary_lines.append(f"slot_left_raw={parse_diag.slot_left_raw or '--'}")
+            summary_lines.append(f"slot_centre_raw={parse_diag.slot_centre_raw or '--'}")
+            summary_lines.append(f"slot_right_raw={parse_diag.slot_right_raw or '--'}")
             if parse_diag.button_overlap_suspected:
                 summary_lines.append(f"button_overlap_suspected={parse_diag.button_overlap_suspected}")
             if parse_diag.block_reason:

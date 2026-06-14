@@ -12,7 +12,7 @@ class ActionValidatorTests(unittest.TestCase):
             normalized_labels=("check", "fold", "raise"),
             raw_entries=("check_button_region='Check'",),
             actions_ambiguous=False,
-            call_button_raw="Check",
+            call_slot_raw="Check",
             action_regions_scanned=True,
         )
         self.assertIn(RecommendedAction.CHECK, result.legal_actions)
@@ -25,7 +25,7 @@ class ActionValidatorTests(unittest.TestCase):
             normalized_labels=("call", "fold", "raise"),
             raw_entries=("call_button_region='Call'",),
             actions_ambiguous=False,
-            call_button_raw="Call",
+            call_slot_raw="Call",
             action_regions_scanned=True,
         )
         self.assertEqual(result.block_reason, "amount_to_call_unreadable")
@@ -35,7 +35,7 @@ class ActionValidatorTests(unittest.TestCase):
             normalized_labels=("call", "fold", "raise"),
             raw_entries=("call_button_region='Call 150'",),
             actions_ambiguous=False,
-            call_button_raw="Call 150",
+            call_slot_raw="Call 150",
             action_regions_scanned=True,
         )
         self.assertIn(RecommendedAction.CALL, result.legal_actions)
@@ -47,7 +47,7 @@ class ActionValidatorTests(unittest.TestCase):
             normalized_labels=("check", "call", "fold"),
             raw_entries=("call_button_region='Check'",),
             actions_ambiguous=False,
-            call_button_raw="Check",
+            call_slot_raw="Check",
             action_regions_scanned=True,
         )
         self.assertIn(RecommendedAction.CHECK, result.legal_actions)
@@ -58,7 +58,7 @@ class ActionValidatorTests(unittest.TestCase):
             normalized_labels=("call", "fold", "raise"),
             raw_entries=("call_button_region='Call 150'",),
             actions_ambiguous=False,
-            call_button_raw="Call 150",
+            call_slot_raw="Call 150",
             action_regions_scanned=True,
         )
         self.assertIn(RecommendedAction.RAISE, result.legal_actions)
@@ -69,8 +69,8 @@ class ActionValidatorTests(unittest.TestCase):
             normalized_labels=("check", "fold", "raise"),
             raw_entries=("raise_button_region='Bet'",),
             actions_ambiguous=False,
-            call_button_raw="Check",
-            raise_button_raw="Bet",
+            call_slot_raw="Check",
+            raise_slot_raw="Bet",
             action_regions_scanned=True,
         )
         self.assertIn(RecommendedAction.BET, result.legal_actions)
@@ -81,7 +81,7 @@ class ActionValidatorTests(unittest.TestCase):
             normalized_labels=("check",),
             raw_entries=(),
             actions_ambiguous=True,
-            call_button_raw=None,
+            call_slot_raw=None,
             action_regions_scanned=True,
         )
         self.assertEqual(result.block_reason, "actions_ambiguous")

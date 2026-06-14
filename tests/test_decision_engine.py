@@ -203,7 +203,15 @@ class TrustedTableStateTests(unittest.TestCase):
 
 
 class EquitySanityTests(unittest.TestCase):
-    def test_no_opponents_is_insufficient_state(self) -> None:
+    def test_no_opponents_runs_with_anonymous_villain(self) -> None:
+        from torn_accessibility_hud.poker.equity import MonteCarloEquityCalculator
+
+        snapshot = GameSnapshot(hero_cards=("As", "Kd"), active_opponents=(), generation=1)
+        result = MonteCarloEquityCalculator(seed=1).calculate(snapshot, {}, simulations=100, timeout_ms=500)
+        self.assertIsNotNone(result.hero_equity)
+        self.assertGreater(result.simulations, 0)
+
+    def test_zero_sim_warning_is_not_ok_status(self) -> None:
         snapshot = GameSnapshot(hero_cards=("As", "Kd"), active_opponents=())
         result = EquityResult(None, 0.0, 0, 1, 0.0, "insufficient state")
         sanitized, status = sanitize_equity_result(result, snapshot)

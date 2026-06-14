@@ -20,6 +20,11 @@ class CallSlotIsolationTests(unittest.TestCase):
         self.assertEqual(status, "ok")
         self.assertEqual(amount, 10.0)
 
+    def test_call_any_sets_zero(self) -> None:
+        amount, status = parse_amount_to_call_from_action_text("CALL ANY")
+        self.assertEqual(status, "zero")
+        self.assertEqual(amount, 0.0)
+
     def test_check_button_sets_zero(self) -> None:
         amount, status = parse_amount_to_call_from_action_text("CHECK")
         self.assertEqual(status, "zero")
@@ -44,13 +49,13 @@ class PerButtonActionTests(unittest.TestCase):
         result = validate_action_inputs(
             normalized_labels=("fold", "call", "raise"),
             raw_entries=(
-                "fold_button_region='FOLD'",
-                "call_button_region='RAISE TO $20 CALL $10'",
-                "raise_button_region='RAISE TO $30'",
+                "action_slot_left='RAISE TO $30'",
+                "action_slot_centre='RAISE TO $20 CALL $10'",
+                "action_slot_right='FOLD'",
             ),
             actions_ambiguous=False,
-            call_button_raw="RAISE TO $20 CALL $10",
-            raise_button_raw="RAISE TO $30",
+            call_slot_raw="RAISE TO $20 CALL $10",
+            raise_slot_raw="RAISE TO $30",
             action_regions_scanned=True,
         )
         self.assertEqual(result.to_call, 10.0)

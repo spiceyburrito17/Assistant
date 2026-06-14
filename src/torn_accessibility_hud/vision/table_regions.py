@@ -1,9 +1,8 @@
-"""Dedicated OCR for pot and hero action button regions."""
+"""Dedicated OCR for pot and fixed action-bar slot regions."""
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,26 +10,23 @@ import numpy as np
 
 from ..config import OCRConfig, RegionsConfig
 from ..diagnostics import debug_log
-from ..models import ButtonOCRResult, OCRLine, PotOCRResult, TableOCRResult
+from ..models import ActionSlotOCRResult, OCRLine, PotOCRResult, TableOCRResult
+from ..parsing.action_slots import ACTION_SLOT_NAMES
+from ..parsing.action_ui import is_post_hand_ui
 from ..parsing.pot_parser import parse_pot_region_text
-from ..parsing.legal_actions import (
-    allowed_labels_for_region,
-    expected_label_for_button_region,
-    extract_actions_for_button_region,
-)
+from .button_region_layout import format_region_coords, validate_action_slot_regions
 from .ocr_engine import EasyOCREngine, format_raw_ocr_debug_lines, preprocess_card_region
 
 
 class TableRegionReader:
-    """Read pot and per-button regions with optional debug capture."""
+    """Read pot and three fixed action-bar slots with optional debug capture."""
 
     POT_REGION = "pot_region"
-    TO_CALL_REGION = "to_call_region"
-    BUTTON_REGION_SUFFIX = "_button_region"
+    MAX_SLOT_WIDTH = 300
 
     def __init__(self, config: OCRConfig) -> None:
         self.config = config
-        self.regions = self._load_regions(config.calibrated_regions_path)
+        self.regions, self.region_warnings = self._load_regions(config.calibrated_regions_path)
         self.output_dir = Path(config.debug_table_regions_dir)
         self.last_saved_at: dict[str, float] = {}
         self.last_error: str | None = None
@@ -52,7 +48,7 @@ class TableRegionReader:
         if not self.regions_configured:
             return TableOCRResult()
         pot_result: PotOCRResult | None = None
-        button_results: list[ButtonOCRResult] = []
+        slot_results: list[ActionSlotOCRResult] = []
         pot_scanned = False
         action_scanned = False
 
@@ -61,21 +57,23 @@ class TableRegionReader:
             pot_scanned = True
             pot_result = self._read_pot_region(capture, ocr, frame_id, pot_region)
 
-        for region_name in sorted(self.regions):
-            if not region_name.endswith(self.BUTTON_REGION_SUFFIX):
+        for slot_name in ACTION_SLOT_NAMES:
+            region = self.regions.get(slot_name)
+            if region is None:
                 continue
-            if not self._should_process(region_name):
+            if not self._should_process(slot_name):
                 continue
             action_scanned = True
-            button_results.append(
-                self._read_button_region(capture, ocr, frame_id, region_name, self.regions[region_name])
-            )
+            slot_results.append(self._read_action_slot(capture, ocr, frame_id, slot_name, region))
 
+        slot_texts = [slot.ocr_scan_raw for slot in slot_results]
         return TableOCRResult(
             pot=pot_result,
-            buttons=tuple(button_results),
+            slots=tuple(slot_results),
             pot_region_scanned=pot_scanned,
             action_regions_scanned=action_scanned,
+            post_hand_ui=any(is_post_hand_ui(text) for text in slot_texts if text),
+            region_layout_warnings=self.region_warnings,
         )
 
     def _read_pot_region(
@@ -130,76 +128,57 @@ class TableRegionReader:
                 self._write_debug_text(prefix, (f"[error] {self.last_error}",))
             return None
 
-    def _read_button_region(
+    def _read_action_slot(
         self,
         capture: Any,
         ocr: EasyOCREngine,
         frame_id: int,
-        region_name: str,
+        slot_name: str,
         region: Any,
-    ) -> ButtonOCRResult:
+    ) -> ActionSlotOCRResult:
         allowlist = self.config.action_ocr_allowlist
-        expected = expected_label_for_button_region(region_name)
-        prefix = self._debug_prefix(region_name, frame_id) if self.debug_enabled else None
-        raw_text = ""
-        normalized_label: str | None = None
-        detected_labels: tuple[str, ...] = ()
+        region_coords = format_region_coords(region)
+        prefix = self._debug_prefix(slot_name, frame_id) if self.debug_enabled else None
+        ocr_scan_raw = ""
         confidence = 0.0
-        ambiguous = False
+        raw_lines: tuple[OCRLine, ...] = ()
         try:
             raw = capture.grab_region(region)
             if raw.size == 0:
-                return ButtonOCRResult(
-                    region_name=region_name,
-                    raw_text="",
-                    normalized_label=None,
-                    confidence=0.0,
-                    ambiguous=False,
-                    expected_label=expected,
-                    detected_labels=(),
+                return ActionSlotOCRResult(
+                    slot_name=slot_name,
+                    region_coords=region_coords,
                 )
             processed = preprocess_card_region(raw, scale=self.config.action_ocr_scale)
             raw_lines = ocr.read_raw(processed, allowlist=allowlist)
-            raw_text = " ".join(line.text for line in raw_lines).strip()
-            ocr_confidence = max((line.confidence for line in raw_lines), default=0.0)
-            extracted = extract_actions_for_button_region(region_name, raw_text, ocr_confidence)
-            detected_labels = tuple(action.label for action in extracted)
-            normalized_label = detected_labels[0] if detected_labels else None
-            confidence = max((action.confidence for action in extracted), default=0.0)
-            ambiguous = any(action.ambiguous for action in extracted)
+            ocr_scan_raw = " ".join(line.text for line in raw_lines).strip()
+            confidence = max((line.confidence for line in raw_lines), default=0.0)
             if prefix is not None:
                 debug_lines = (
-                    f"=== action button OCR frame {frame_id:06d} region={region_name} ===",
-                    f"expected_label={expected!r}",
-                    f"slot_labels={allowed_labels_for_region(region_name)!r}",
+                    f"=== action slot OCR frame {frame_id:06d} slot={slot_name} ===",
+                    f"region_coords={region_coords!r}",
                     f"allowlist={allowlist!r}",
-                    f"raw_text={raw_text!r}",
-                    f"detected_labels={list(detected_labels)!r}",
-                    f"normalized_label={normalized_label!r}",
-                    f"confidence={confidence:.4f}",
-                    f"ambiguous={ambiguous}",
-                    *format_raw_ocr_debug_lines(f"{region_name}.preprocessed", raw_lines, allowlist),
+                    f"ocr_scan_raw={ocr_scan_raw!r}",
+                    f"ocr_confidence={confidence:.4f}",
+                    *format_raw_ocr_debug_lines(f"{slot_name}.preprocessed", raw_lines, allowlist),
                 )
                 self._save_debug_images(prefix, raw, processed, debug_lines)
-            self.last_saved_at[region_name] = time.monotonic()
+            self.last_saved_at[slot_name] = time.monotonic()
         except Exception as exc:  # noqa: BLE001
-            self.last_error = f"{region_name} OCR failed: {type(exc).__name__}: {exc}"
+            self.last_error = f"{slot_name} OCR failed: {type(exc).__name__}: {exc}"
             if prefix is not None:
                 self._write_debug_text(prefix, (f"[error] {self.last_error}",))
-        return ButtonOCRResult(
-            region_name=region_name,
-            raw_text=raw_text,
-            normalized_label=normalized_label,
-            confidence=confidence,
-            ambiguous=ambiguous,
-            expected_label=expected,
-            detected_labels=detected_labels,
+        return ActionSlotOCRResult(
+            slot_name=slot_name,
+            ocr_scan_raw=ocr_scan_raw,
+            region_coords=region_coords,
+            ocr_confidence=confidence,
         )
 
     def _should_process(self, region_name: str) -> bool:
         if region_name == self.POT_REGION:
             interval = max(self.config.pot_ocr_interval_sec, 0.0)
-        elif region_name.endswith(self.BUTTON_REGION_SUFFIX):
+        elif region_name in ACTION_SLOT_NAMES:
             interval = max(self.config.action_ocr_interval_sec, 0.0)
         else:
             interval = max(self.config.debug_table_regions_interval_sec, 0.1)
@@ -234,7 +213,7 @@ class TableRegionReader:
             for line in debug_lines:
                 fp.write(f"{line}\n")
 
-    def _load_regions(self, path: str | None) -> dict[str, Any]:
+    def _load_regions(self, path: str | None) -> tuple[dict[str, Any], tuple[str, ...]]:
         regions: dict[str, Any] = {}
         if path:
             regions_path = Path(path)
@@ -248,8 +227,18 @@ class TableRegionReader:
         selected = {
             name: regions[name]
             for name in regions
-            if name == self.POT_REGION or name.endswith(self.BUTTON_REGION_SUFFIX)
+            if name == self.POT_REGION or name in ACTION_SLOT_NAMES
         }
-        for name in selected:
-            debug_log("configured table region %s: %sx%s", name, selected[name].width, selected[name].height)
-        return selected
+        filtered, warnings = validate_action_slot_regions(selected)
+        for warning in warnings:
+            debug_log("[REGIONS] %s", warning)
+        for name in filtered:
+            region = filtered[name]
+            debug_log(
+                "configured table region %s: coords=%s size=%sx%s",
+                name,
+                format_region_coords(region),
+                region.width,
+                region.height,
+            )
+        return filtered, warnings

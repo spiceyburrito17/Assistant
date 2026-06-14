@@ -10,6 +10,7 @@ _CALL_AMOUNT_RE = re.compile(
     re.IGNORECASE,
 )
 _CHECK_RE = re.compile(r"\bcheck\b", re.IGNORECASE)
+_CALL_ANY_RE = re.compile(r"\bcall\s+any\b", re.IGNORECASE)
 _RAISE_TO_RE = re.compile(r"\braise\s+to\b", re.IGNORECASE)
 _CALL_OR_CHECK_START_RE = re.compile(r"\b(check|call)\b", re.IGNORECASE)
 _RAISE_OR_BET_START_RE = re.compile(r"\b(raise\s+to|raise|bet)\b", re.IGNORECASE)
@@ -92,6 +93,9 @@ def parse_amount_to_call_from_action_text(
         return None, "empty"
 
     if _CHECK_RE.search(stripped) and _CALL_AMOUNT_RE.search(stripped) is None:
+        return 0.0, "zero"
+
+    if _CALL_ANY_RE.search(stripped) and _CALL_AMOUNT_RE.search(stripped) is None:
         return 0.0, "zero"
 
     match = _CALL_AMOUNT_RE.search(stripped)

@@ -93,6 +93,16 @@ class OCRLine:
 
 
 @dataclass(frozen=True)
+class ActionSlotOCRResult:
+    """OCR output for one fixed action-bar slot (left, centre, or right)."""
+
+    slot_name: str
+    ocr_scan_raw: str = ""
+    region_coords: str | None = None
+    ocr_confidence: float = 0.0
+
+
+@dataclass(frozen=True)
 class PotOCRResult:
     raw_text: str
     parsed_amount: float | None
@@ -107,22 +117,13 @@ class PotOCRResult:
 
 
 @dataclass(frozen=True)
-class ButtonOCRResult:
-    region_name: str
-    raw_text: str
-    normalized_label: str | None
-    confidence: float
-    ambiguous: bool
-    expected_label: str | None = None
-    detected_labels: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
 class TableOCRResult:
     pot: PotOCRResult | None = None
-    buttons: tuple[ButtonOCRResult, ...] = ()
+    slots: tuple[ActionSlotOCRResult, ...] = ()
     pot_region_scanned: bool = False
     action_regions_scanned: bool = False
+    post_hand_ui: bool = False
+    region_layout_warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -141,10 +142,13 @@ class TableParseDiagnostics:
     legal_actions_normalized: tuple[str, ...] = ()
     amount_to_call_raw: str | None = None
     amount_to_call_parsed: float | None = None
-    fold_button_raw: str | None = None
-    call_button_raw: str | None = None
-    raise_button_raw: str | None = None
-    button_overlap_suspected: str | None = None
+    slot_left_raw: str | None = None
+    slot_centre_raw: str | None = None
+    slot_right_raw: str | None = None
+    slot_left_coords: str | None = None
+    slot_centre_coords: str | None = None
+    slot_right_coords: str | None = None
+    post_hand_ui: bool = False
     actions_ambiguous: bool = False
     block_reason: str | None = None
 

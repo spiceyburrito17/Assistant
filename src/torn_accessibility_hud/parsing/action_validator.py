@@ -35,14 +35,18 @@ def validate_action_inputs(
     normalized_labels: tuple[str, ...],
     raw_entries: tuple[str, ...],
     actions_ambiguous: bool,
-    call_button_raw: str | None,
-    raise_button_raw: str | None = None,
+    call_slot_raw: str | None = None,
+    raise_slot_raw: str | None = None,
     action_regions_scanned: bool,
+    call_button_raw: str | None = None,
+    raise_button_raw: str | None = None,
 ) -> ValidatedActionInputs:
-    """Apply check/call, bet/raise, and to-call rules to button OCR output."""
+    """Apply check/call, bet/raise, and to-call rules to action-bar slot OCR."""
 
+    effective_call_raw = call_slot_raw if call_slot_raw is not None else call_button_raw
+    effective_raise_raw = raise_slot_raw if raise_slot_raw is not None else raise_button_raw
     labels = _dedupe_labels(label for label in normalized_labels if label in STRICT_LABELS)
-    amount_read = _read_amount_to_call(call_button_raw)
+    amount_read = _read_amount_to_call(effective_call_raw)
     to_call = _resolve_to_call(amount_read)
 
     if actions_ambiguous:
@@ -57,7 +61,7 @@ def validate_action_inputs(
         )
 
     labels = _apply_check_call_rules(labels, amount_read, to_call)
-    labels = _apply_bet_raise_rules(labels, to_call, raise_button_raw=raise_button_raw)
+    labels = _apply_bet_raise_rules(labels, to_call, raise_slot_raw=effective_raise_raw)
     legal_actions = _to_recommended(labels)
 
     resolved_to_call = to_call
@@ -140,12 +144,15 @@ def _apply_bet_raise_rules(
     labels: tuple[str, ...],
     to_call: float | None,
     *,
-    raise_button_raw: str | None,
+    raise_slot_raw: str | None = None,
+    raise_button_raw: str | None = None,
 ) -> tuple[str, ...]:
+    effective_raise_raw = raise_slot_raw if raise_slot_raw is not None else raise_button_raw
     label_set = set(labels)
     facing_bet = to_call is not None and to_call > 0
-    raise_wording = raise_to_pattern_present(raise_button_raw) or (
-        raise_button_raw is not None and re.search(r"\braise\b", raise_button_raw, re.IGNORECASE) is not None
+    raise_wording = raise_to_pattern_present(effective_raise_raw) or (
+        effective_raise_raw is not None
+        and re.search(r"\braise\b", effective_raise_raw, re.IGNORECASE) is not None
     )
 
     if raise_wording:
@@ -160,9 +167,9 @@ def _apply_bet_raise_rules(
             label_set.add("raise")
         return _ordered_labels(label_set)
 
-    if "raise" in label_set and raise_button_raw:
-        if re.search(r"\bbet\b", raise_button_raw, re.IGNORECASE) and not re.search(
-            r"\braise\b", raise_button_raw, re.IGNORECASE
+    if "raise" in label_set and effective_raise_raw:
+        if re.search(r"\bbet\b", effective_raise_raw, re.IGNORECASE) and not re.search(
+            r"\braise\b", effective_raise_raw, re.IGNORECASE
         ):
             label_set.discard("raise")
             label_set.add("bet")
