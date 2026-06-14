@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import queue
 import threading
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -23,11 +22,12 @@ from .parsing.log_parser import ActionLogParser
 from .poker.equity import EquityWorker
 from .state import TrustedTableStateManager
 from .tracking.ledger import OpponentLedger
+from .bridge.ws_server import PokerWebSocketBridge
+from .bridge.payload import BridgeTableUpdate
+from .bridge.adapters import apply_bridge_update
 debug_log("app module importing TkOverlay")
 from .ui.overlay import TkOverlay
 from .ui.recommendation import RecommendationEngine
-debug_log("app module importing OCRWorker")
-from .vision.ocr_engine import OCRWorker
 
 debug_log("app module import completed")
 
@@ -92,19 +92,23 @@ class SnapshotBuilder:
 
 
 class CoordinatorWorker(threading.Thread):
-    """Parse OCR batches, update tracking, and submit equity requests."""
+    """Apply bridge table updates, submit equity requests, and publish the HUD."""
 
     def __init__(
         self,
         config: AppConfig,
         ocr_queue: queue.Queue[OCRBatch],
+        bridge_queue: queue.Queue[BridgeTableUpdate],
         equity_worker: EquityWorker,
         equity_result_queue: queue.Queue[EquityResult],
         overlay: TkOverlay,
+        bridge: PokerWebSocketBridge,
     ) -> None:
         super().__init__(name="torn-coordinator-worker", daemon=True)
         self.config = config
         self.ocr_queue = ocr_queue
+        self.bridge_queue = bridge_queue
+        self.bridge = bridge
         self.equity_worker = equity_worker
         self.equity_result_queue = equity_result_queue
         self.overlay = overlay
@@ -139,7 +143,8 @@ class CoordinatorWorker(threading.Thread):
     def run(self) -> None:
         self._publish()
         while not self.stop_event.is_set():
-            self._drain_ocr()
+            # self._drain_ocr()
+            self._drain_bridge()
             self._drain_equity()
             self._submit_equity_if_needed()
             self._publish()
@@ -175,6 +180,21 @@ class CoordinatorWorker(threading.Thread):
             if self.latest_equity is not None and self.latest_equity.generation != snapshot.generation:
                 self.latest_equity = None
 
+    def _drain_bridge(self) -> None:
+        latest: BridgeTableUpdate | None = None
+        while True:
+            try:
+                latest = self.bridge_queue.get_nowait()
+            except queue.Empty:
+                break
+        if latest is None:
+            return
+
+        self.builder.snapshot = apply_bridge_update(self.builder.snapshot, latest)
+
+        if self.latest_equity is not None and self.latest_equity.generation != self.builder.snapshot.generation:
+            self.latest_equity = None
+
     def _drain_equity(self) -> None:
         snapshot_generation = self.builder.snapshot.generation
         while True:
@@ -207,13 +227,14 @@ class CoordinatorWorker(threading.Thread):
 
     def _publish(self) -> None:
         snapshot = self.builder.snapshot
-        trusted = self.trusted_state.trusted
         recommendation = self.recommendations.build(snapshot, self.latest_equity)
-        parse_diag = snapshot.parse_diagnostics or trusted.parse_diagnostics
+        parse_diag = snapshot.parse_diagnostics
         diagnostics = {
-            "state_confidence": trusted.state_confidence.value,
-            "legal_actions": ",".join(action.value for action in trusted.legal_actions) or "--",
+            "state_confidence": snapshot.state_confidence.value,
+            "legal_actions": ",".join(action.value for action in snapshot.legal_actions) or "--",
             "solver_status": recommendation.solver_status.value,
+            "bridge_clients": str(self.bridge.client_count),
+            "bridge_messages": str(self.bridge.messages_received),
         }
         if parse_diag is not None:
             diagnostics["pot_crop_text"] = parse_diag.pot_crop_text or parse_diag.pot_raw or "--"
@@ -258,6 +279,8 @@ class CoordinatorWorker(threading.Thread):
             diagnostics["decision_blocked_reason"] = block_reason
         if self.equity_worker.last_error:
             diagnostics["equity_error"] = self.equity_worker.last_error
+        if self.bridge.last_error:
+            diagnostics["bridge_error"] = self.bridge.last_error
         if self.latest_equity is not None:
             diagnostics["equity_simulations"] = str(self.latest_equity.simulations)
             if self.latest_equity.warning:
@@ -265,7 +288,7 @@ class CoordinatorWorker(threading.Thread):
         state = OverlayState(
             snapshot=snapshot,
             recommendation=recommendation,
-            latest_lines=self.latest_lines,
+            latest_lines=(),
             equity_result=self.latest_equity,
             diagnostics=diagnostics,
         )
@@ -308,9 +331,11 @@ class TornHudApplication:
         self.overlay = TkOverlay(config.overlay)
         write_startup_log("app startup: TkOverlay created")
         debug_log("app startup: TkOverlay created")
-        self.ocr_worker = OCRWorker(config, self.ocr_queue)
-        write_startup_log("app startup: OCRWorker created")
-        debug_log("app startup: OCRWorker created")
+        # self.ocr_worker = OCRWorker(config, self.ocr_queue)
+        self.bridge_queue: queue.Queue[BridgeTableUpdate] = queue.Queue(maxsize=8)
+        self.bridge = PokerWebSocketBridge(self.bridge_queue, port=8765)
+        write_startup_log("app startup: PokerWebSocketBridge created")
+        debug_log("app startup: PokerWebSocketBridge created")
         self.equity_worker = EquityWorker(
             self.equity_request_queue,
             self.equity_result_queue,
@@ -321,9 +346,11 @@ class TornHudApplication:
         self.coordinator = CoordinatorWorker(
             config,
             self.ocr_queue,
+            self.bridge_queue,
             self.equity_worker,
             self.equity_result_queue,
             self.overlay,
+            self.bridge,
         )
         write_startup_log("app startup: CoordinatorWorker created")
         debug_log("app startup: CoordinatorWorker created")
@@ -331,8 +358,9 @@ class TornHudApplication:
     def run(self) -> None:
         write_startup_log("app startup: starting worker threads")
         debug_log("app startup: starting worker threads")
-        debug_log("Starting thread: %s", _describe_thread(self.ocr_worker))
-        self.ocr_worker.start()
+        # self.ocr_worker.start()
+        self.bridge.start()
+        debug_log("Starting bridge: ws://localhost:8765")
         debug_log("Starting thread: %s", _describe_thread(self.equity_worker))
         self.equity_worker.start()
         debug_log("Starting thread: %s", _describe_thread(self.coordinator))
@@ -345,10 +373,11 @@ class TornHudApplication:
             self.stop()
 
     def stop(self) -> None:
-        self.ocr_worker.stop()
+        # self.ocr_worker.stop()
+        self.bridge.stop()
         self.equity_worker.stop()
         self.coordinator.stop()
-        for worker in (self.ocr_worker, self.equity_worker, self.coordinator):
+        for worker in (self.bridge, self.equity_worker, self.coordinator):
             worker.join(timeout=1.0)
 
 

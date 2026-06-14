@@ -64,6 +64,10 @@ class PokerWebSocketBridge:
         if self._thread is not None:
             self._thread.join(timeout=2.0)
 
+    def join(self, timeout: float | None = None) -> None:
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+
     @property
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
