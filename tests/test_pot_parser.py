@@ -126,6 +126,37 @@ class PotParserTests(unittest.TestCase):
         self.assertEqual(result.candidate, "1,145")
         self.assertEqual(result.status, "ok")
 
+    def test_misread_dollar_as_eight_before_amount(self) -> None:
+        result = parse_pot_text_detailed("POT 8120")
+        self.assertEqual(result.normalized, 120.0)
+        self.assertEqual(result.candidate, "120")
+        self.assertEqual(result.status, "ok")
+
+    def test_misread_dollar_as_eight_with_label_punctuation(self) -> None:
+        amount, status = parse_pot_text("POT: 8120")
+        self.assertEqual(amount, 120.0)
+        self.assertEqual(status, "ok")
+
+    def test_comma_formatted_pot_starting_with_eight_not_stripped(self) -> None:
+        amount, status = parse_pot_text("POT: 8,120")
+        self.assertEqual(amount, 8120.0)
+        self.assertEqual(status, "ok")
+
+    def test_comma_formatted_pot_starting_with_five_not_stripped(self) -> None:
+        amount, status = parse_pot_text("POT: 5,120")
+        self.assertEqual(amount, 5120.0)
+        self.assertEqual(status, "ok")
+
+    def test_four_digit_pot_without_comma_not_stripped_when_real(self) -> None:
+        amount, status = parse_pot_text("POT: 5120")
+        self.assertEqual(amount, 5120.0)
+        self.assertEqual(status, "ok")
+
+    def test_large_comma_formatted_pot_not_stripped(self) -> None:
+        amount, status = parse_pot_text("POT: 81,200")
+        self.assertEqual(amount, 81200.0)
+        self.assertEqual(status, "ok")
+
 
 class PotSanityTests(unittest.TestCase):
     def test_rejects_absurd_jump(self) -> None:

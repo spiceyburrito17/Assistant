@@ -8,7 +8,7 @@ from dataclasses import dataclass
 _POT_TARGET = "POT"
 _PUNCT_AFTER_POT = frozenset(" \t:-.;")
 _MIN_WEAK_DIGITS = 3
-_MISREAD_DOLLAR_DIGITS = frozenset("56")
+_MISREAD_DOLLAR_DIGITS = frozenset("568")
 _CURRENCY_CHARS = frozenset("$£€")
 # Per-position OCR confusions when the pot allowlist excludes letters (POT read as 816).
 _POT_OCR_EQUIV: tuple[frozenset[str], ...] = (
@@ -252,7 +252,7 @@ def _skip_optional_currency_prefix(text: str, start: int) -> int:
 
 
 def _should_skip_misread_dollar_digit(full: str, skipped: str) -> bool:
-    """Treat a leading ``5``/``6`` as a misread dollar sign before the real amount."""
+    """Treat a leading ``5``/``6``/``8`` as a misread dollar sign before the real amount."""
 
     full_digits = re.sub(r"[^\d]", "", full)
     skipped_digits = re.sub(r"[^\d]", "", skipped)
@@ -265,10 +265,69 @@ def _should_skip_misread_dollar_digit(full: str, skipped: str) -> bool:
         return False
     if skipped_val <= 0:
         return False
-    if len(full_digits) >= 4:
+
+    if "," in full:
+        return _should_skip_misread_dollar_digit_with_comma(
+            full,
+            skipped,
+            full_val,
+            skipped_val,
+        )
+
+    return _should_skip_misread_dollar_digit_without_comma(
+        full_digits,
+        skipped_digits,
+        full_val,
+        skipped_val,
+    )
+
+
+def _should_skip_misread_dollar_digit_without_comma(
+    full_digits: str,
+    skipped_digits: str,
+    full_val: float,
+    skipped_val: float,
+) -> bool:
+    """Heuristic when OCR dropped commas (e.g. ``8120`` for ``$120``)."""
+
+    leading = full_digits[0]
+    digit_len = len(full_digits)
+
+    # ``POT: $120`` often OCRs as ``8120`` — four digits, no comma, leading ``8``.
+    if digit_len == 4 and leading == "8":
         return True
-    if len(full_digits) == 3 and len(skipped_digits) >= 2:
+
+    if digit_len == 3 and len(skipped_digits) >= 2:
         return full_val / skipped_val < 8.0
+
+    # ``5660`` → ``660`` and ``6190`` → ``190``, but not ``5120`` → ``120`` for ``$5,120``.
+    if digit_len == 4 and leading in "56":
+        return full_val / skipped_val < 40.0
+
+    return False
+
+
+def _should_skip_misread_dollar_digit_with_comma(
+    full: str,
+    skipped: str,
+    full_val: float,
+    skipped_val: float,
+) -> bool:
+    """Heuristic when commas are present — Torn uses ``X,XXX`` / ``XX,XXX`` grouping."""
+
+    before_comma = full.split(",", 1)[0]
+    if before_comma.isdigit() and len(before_comma) == 1:
+        # ``8,120`` / ``5,120``: single digit before comma is a real thousands digit.
+        return False
+
+    if "," not in skipped:
+        return False
+
+    skipped_before_comma = skipped.split(",", 1)[0]
+    if skipped_before_comma.isdigit() and len(skipped_before_comma) == 1:
+        # ``51,145`` → ``1,145``: misread ``$`` prepended to a comma-formatted amount.
+        return full_val / skipped_val < 50.0
+
     return False
 
 
