@@ -77,6 +77,19 @@ class ActionSlotParsingTests(unittest.TestCase):
         self.assertEqual(parsed.amount_to_call_parsed, 20.0)
         self.assertEqual(parsed.slot_left_raw, "RAISE TO $40")
 
+    def test_unclassified_slot_does_not_block_when_actions_found(self) -> None:
+        table_ocr = TableOCRResult(
+            slots=(
+                ActionSlotOCRResult(slot_name="action_slot_left", ocr_scan_raw="RAISE TO $40"),
+                ActionSlotOCRResult(slot_name="action_slot_centre", ocr_scan_raw="CALL $20"),
+                ActionSlotOCRResult(slot_name="action_slot_right", ocr_scan_raw="???"),
+            ),
+            action_regions_scanned=True,
+        )
+        parsed = parse_action_bar(table_ocr)
+        self.assertFalse(parsed.actions_ambiguous)
+        self.assertEqual(set(parsed.legal_actions_normalized), {"raise", "call"})
+
 
 if __name__ == "__main__":
     unittest.main()

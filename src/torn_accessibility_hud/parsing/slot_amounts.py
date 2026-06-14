@@ -61,7 +61,7 @@ def parse_raise_to_amount_from_action_text(
     if not raise_to_pattern_present(normalized):
         return None
     match = re.search(
-        rf"\braise\s+to\b\s+(?:[$£€])?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+        rf"\braise\s+to\b\s+(?:[$£€])?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*([KkMm])?",
         normalized,
         re.IGNORECASE,
     )
@@ -70,7 +70,10 @@ def parse_raise_to_amount_from_action_text(
         if token_match is None:
             return None
         return parse_chip_amount(normalize_slot_money_token(token_match.group(2)), max_reasonable=max_reasonable)
-    return parse_chip_amount(match.group(1), max_reasonable=max_reasonable)
+    amount_text = match.group(1)
+    if match.group(2):
+        amount_text = f"{amount_text}{match.group(2)}"
+    return parse_chip_amount(amount_text, max_reasonable=max_reasonable)
 
 
 def parse_amount_to_call_from_slot_text(

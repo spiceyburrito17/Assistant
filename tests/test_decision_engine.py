@@ -211,6 +211,22 @@ class EquitySanityTests(unittest.TestCase):
         self.assertIsNotNone(result.hero_equity)
         self.assertGreater(result.simulations, 0)
 
+    def test_partial_timeout_still_emits_action(self) -> None:
+        snapshot = _trusted_snapshot()
+        result = EquityResult(
+            hero_equity=0.35,
+            tie_rate=0.0,
+            simulations=150,
+            generation=1,
+            elapsed_ms=900.0,
+            warning="simulation budget hit timeout after 150 simulations",
+        )
+        recommendation = RecommendationEngine().build(snapshot, result)
+        self.assertEqual(recommendation.solver_status, SolverStatus.OK)
+        self.assertNotEqual(recommendation.action, RecommendedAction.WAIT)
+        self.assertIsNone(recommendation.decision_blocked_reason)
+        self.assertEqual(recommendation.action, RecommendedAction.CALL)
+
     def test_zero_sim_warning_is_not_ok_status(self) -> None:
         snapshot = GameSnapshot(hero_cards=("As", "Kd"), active_opponents=())
         result = EquityResult(None, 0.0, 0, 1, 0.0, "insufficient state")

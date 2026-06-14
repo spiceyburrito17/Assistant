@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import re
 
-_AMOUNT_RE = re.compile(r"(?<![a-z])(?:[$£€])?\s*([0-9][0-9,]*(?:\.[0-9]+)?)")
+_AMOUNT_RE = re.compile(
+    r"(?<![a-zA-Z])(?:[$£€])?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*([KkMm])?\b"
+)
 _CALL_AMOUNT_RE = re.compile(
-    r"\bcall\b[^0-9$£€]*(?:[$£€])?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+    r"\bcall\b[^0-9$£€KkMm]*(?:[$£€])?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*([KkMm])?",
     re.IGNORECASE,
 )
 _CHECK_RE = re.compile(r"\bcheck\b", re.IGNORECASE)
@@ -15,6 +17,15 @@ _RAISE_TO_RE = re.compile(r"\braise\s+to\b", re.IGNORECASE)
 _CALL_OR_CHECK_START_RE = re.compile(r"\b(check|call)\b", re.IGNORECASE)
 _RAISE_OR_BET_START_RE = re.compile(r"\b(raise\s+to|raise|bet)\b", re.IGNORECASE)
 _FOLD_START_RE = re.compile(r"\bfold\b", re.IGNORECASE)
+
+
+def _apply_amount_suffix(value: float, suffix: str | None) -> float:
+    if not suffix:
+        return value
+    multiplier = {"K": 1_000.0, "M": 1_000_000.0}.get(suffix.upper())
+    if multiplier is None:
+        return value
+    return value * multiplier
 
 
 def parse_chip_amount(raw: str | None, *, max_reasonable: float = 10_000_000.0) -> float | None:
@@ -27,6 +38,7 @@ def parse_chip_amount(raw: str | None, *, max_reasonable: float = 10_000_000.0) 
         value = float(match.group(1).replace(",", ""))
     except ValueError:
         return None
+    value = _apply_amount_suffix(value, match.group(2))
     if value < 0 or value > max_reasonable:
         return None
     return value
@@ -104,7 +116,10 @@ def parse_amount_to_call_from_action_text(
             return 0.0, "zero"
         return None, "no_call_marker"
 
-    value = parse_chip_amount(match.group(1), max_reasonable=max_reasonable)
+    amount_text = match.group(1)
+    if match.group(2):
+        amount_text = f"{amount_text}{match.group(2)}"
+    value = parse_chip_amount(amount_text, max_reasonable=max_reasonable)
     if value is None:
         return None, "invalid_amount"
     if value <= 0:

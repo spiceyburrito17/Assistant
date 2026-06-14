@@ -43,6 +43,24 @@ class SlotMoneyTokenTests(unittest.TestCase):
 
     def test_parse_raise_to_amount(self) -> None:
         self.assertEqual(parse_raise_to_amount_from_action_text("RAISE TO Szoo"), 200.0)
+        self.assertEqual(parse_raise_to_amount_from_action_text("RAISE TO $18K"), 18000.0)
+
+
+class SlotAmountSuffixTests(unittest.TestCase):
+    def test_call_amount_k_suffix(self) -> None:
+        parsed, status = parse_amount_to_call_from_slot_text("CALL $18K")
+        self.assertEqual(status, "ok")
+        self.assertEqual(parsed, 18000.0)
+
+    def test_call_amount_fractional_k_suffix(self) -> None:
+        parsed, status = parse_amount_to_call_from_slot_text("CALL $1.2K")
+        self.assertEqual(status, "ok")
+        self.assertEqual(parsed, 1200.0)
+
+    def test_call_amount_m_suffix(self) -> None:
+        parsed, status = parse_amount_to_call_from_slot_text("CALL $1M")
+        self.assertEqual(status, "ok")
+        self.assertEqual(parsed, 1_000_000.0)
 
 
 class SlotOCRIntegrationTests(unittest.TestCase):

@@ -58,7 +58,7 @@ class OCRConfig:
     pot_ocr_allowlist: str = "POT: $0123456789,."
     pot_ocr_interval_sec: float = 0.0
     action_ocr_scale: float = 3.0
-    action_ocr_allowlist: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz $0123456789,./"
+    action_ocr_allowlist: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz $0123456789,./KkMm"
     action_ocr_interval_sec: float = 0.0
 
 

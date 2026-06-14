@@ -140,7 +140,7 @@ def parse_action_bar(table_ocr: TableOCRResult) -> ParsedActionBar:
 
     normalized: list[str] = []
     raw_entries: list[str] = []
-    ambiguous = False
+    has_unclassified_slot = False
     call_slot_raw: str | None = None
     raise_slot_raw: str | None = None
 
@@ -149,7 +149,7 @@ def parse_action_bar(table_ocr: TableOCRResult) -> ParsedActionBar:
             continue
         raw_entries.append(f"{item.slot_name}={item.raw_text!r}")
         if item.ambiguous:
-            ambiguous = True
+            has_unclassified_slot = True
             continue
         if item.label is None:
             continue
@@ -164,6 +164,8 @@ def parse_action_bar(table_ocr: TableOCRResult) -> ParsedActionBar:
             if item.label == "check" and item.raw_text:
                 call_slot_raw = item.raw_text
                 break
+
+    ambiguous = has_unclassified_slot and not normalized
 
     validated = validate_action_inputs(
         normalized_labels=tuple(normalized),

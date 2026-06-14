@@ -216,11 +216,21 @@ class DecisionEngine:
             notes.append("equity unavailable")
         elif inputs.simulations <= 0:
             notes.append("equity not simulated")
-        if inputs.equity_warning:
+        if inputs.equity_warning and not self._is_non_blocking_equity_warning(
+            inputs.equity_warning,
+            inputs.simulations,
+        ):
             notes.append(inputs.equity_warning.lower())
         if notes:
             return DecisionConfidence.LOW, tuple(notes)
         return DecisionConfidence.HIGH, ()
+
+    @staticmethod
+    def _is_non_blocking_equity_warning(warning: str, simulations: int) -> bool:
+        lowered = warning.lower()
+        if "timeout after" in lowered and simulations >= 100:
+            return True
+        return False
 
     def _choose_action(
         self,
@@ -230,8 +240,6 @@ class DecisionEngine:
     ) -> RecommendedAction:
         snapshot = inputs.snapshot
         if edge is None or inputs.hero_equity is None:
-            return RecommendedAction.WAIT
-        if confidence is DecisionConfidence.LOW:
             return RecommendedAction.WAIT
 
         thresholds = self.thresholds
