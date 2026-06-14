@@ -212,8 +212,6 @@ class TkOverlay:
             summary_lines.append(f"slot_left_raw={parse_diag.slot_left_raw or '--'}")
             summary_lines.append(f"slot_centre_raw={parse_diag.slot_centre_raw or '--'}")
             summary_lines.append(f"slot_right_raw={parse_diag.slot_right_raw or '--'}")
-            if parse_diag.button_overlap_suspected:
-                summary_lines.append(f"button_overlap_suspected={parse_diag.button_overlap_suspected}")
             if parse_diag.block_reason:
                 summary_lines.append(f"block_reason={parse_diag.block_reason}")
         debug_lines = [

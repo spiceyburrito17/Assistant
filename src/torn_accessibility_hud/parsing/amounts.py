@@ -122,7 +122,9 @@ def parse_to_call_from_button_text(text: str, *, max_reasonable: float = 10_000_
 
 
 def call_amount_present(text: str) -> bool:
-    parsed, status = parse_amount_to_call_from_action_text(text)
+    from .slot_amounts import parse_amount_to_call_from_slot_text
+
+    parsed, status = parse_amount_to_call_from_slot_text(text)
     return status == "ok" and parsed is not None and parsed > 0
 
 

@@ -65,7 +65,7 @@ class MonteCarloEquityCalculator:
 
             for _ in range(max(simulations, 1)):
                 if (time.monotonic() - started) * 1000.0 >= timeout_ms and completed > 0:
-                    warning = "simulation budget hit timeout"
+                    warning = f"simulation budget hit timeout after {completed} simulations"
                     break
                 excluded = set(dead_cards)
                 opponent_hands: list[tuple[str, str]] = []

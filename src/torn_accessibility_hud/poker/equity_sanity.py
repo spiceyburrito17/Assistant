@@ -16,6 +16,8 @@ def classify_solver_status(result: EquityResult, snapshot: GameSnapshot) -> Solv
             return SolverStatus.SKIPPED
         return SolverStatus.SKIPPED
     if "timeout" in warning:
+        if result.hero_equity is not None and result.simulations >= 100:
+            return SolverStatus.OK
         return SolverStatus.TIMEOUT
     if result.hero_equity is None and result.simulations <= 0:
         return SolverStatus.SKIPPED

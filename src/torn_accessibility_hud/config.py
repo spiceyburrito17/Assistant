@@ -72,7 +72,7 @@ class ParserConfig:
 @dataclass(frozen=True)
 class EquityConfig:
     simulations: int = 2500
-    timeout_ms: int = 450
+    timeout_ms: int = 900
     max_opponents: int = 8
     random_seed: int | None = None
 
@@ -302,7 +302,7 @@ def write_default_config(path: str | Path) -> Path:
         },
         "equity": {
             "simulations": 2500,
-            "timeout_ms": 450,
+            "timeout_ms": 900,
             "max_opponents": 8,
             "random_seed": None,
         },

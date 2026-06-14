@@ -8,13 +8,9 @@ from dataclasses import dataclass
 from ..models import ActionSlotOCRResult, RecommendedAction, TableOCRResult
 from .action_ui import is_post_hand_ui
 from .action_validator import validate_action_inputs
-from .amounts import (
-    call_amount_present,
-    parse_amount_to_call_from_action_text,
-    parse_chip_amount,
-    raise_to_pattern_present,
-)
+from .amounts import call_amount_present, raise_to_pattern_present
 from .legal_actions import LEGAL_ACTION_LABELS, legal_action_to_recommended
+from .slot_amounts import normalize_slot_action_text_for_amounts, parse_amount_to_call_from_slot_text
 
 ACTION_SLOT_NAMES: tuple[str, ...] = (
     "action_slot_left",
@@ -63,9 +59,9 @@ class ParsedActionBar:
 
 
 def classify_slot_text(slot_name: str, text: str) -> SlotClassification:
-    stripped = text.strip()
+    stripped = normalize_slot_action_text_for_amounts(text.strip())
     if not stripped:
-        return SlotClassification(slot_name=slot_name, raw_text="")
+        return SlotClassification(slot_name=slot_name, raw_text=text.strip())
 
     if is_post_hand_ui(stripped):
         return SlotClassification(slot_name=slot_name, raw_text=stripped, post_hand=True)
@@ -88,6 +84,15 @@ def classify_slot_text(slot_name: str, text: str) -> SlotClassification:
         return SlotClassification(slot_name=slot_name, raw_text=stripped, label="bet")
 
     if _CALL_RE.search(stripped):
+        if _CALL_ANY_RE.search(stripped):
+            parsed, _status = parse_amount_to_call_from_slot_text(stripped)
+            if parsed is None or parsed == 0:
+                return SlotClassification(
+                    slot_name=slot_name,
+                    raw_text=stripped,
+                    label="check",
+                    pre_action_toggle=True,
+                )
         return SlotClassification(slot_name=slot_name, raw_text=stripped, label="call")
 
     if _CHECK_RE.search(stripped) and not call_amount_present(stripped):

@@ -184,6 +184,10 @@ class CoordinatorWorker(threading.Thread):
                 break
             if result.generation == snapshot_generation:
                 self.latest_equity = result
+            elif result.generation <= snapshot_generation and (
+                self.latest_equity is None or result.generation > self.latest_equity.generation
+            ):
+                self.latest_equity = result
 
     def _submit_equity_if_needed(self) -> None:
         snapshot = self.builder.snapshot
@@ -245,8 +249,6 @@ class CoordinatorWorker(threading.Thread):
             diagnostics["slot_centre_coords"] = parse_diag.slot_centre_coords or "--"
             diagnostics["slot_right_coords"] = parse_diag.slot_right_coords or "--"
             diagnostics["post_hand_ui"] = "true" if parse_diag.post_hand_ui else "false"
-            if parse_diag.button_overlap_suspected:
-                diagnostics["button_overlap_suspected"] = parse_diag.button_overlap_suspected
             if parse_diag.block_reason:
                 diagnostics["block_reason"] = parse_diag.block_reason
         block_reason = recommendation.decision_blocked_reason or (
@@ -256,6 +258,10 @@ class CoordinatorWorker(threading.Thread):
             diagnostics["decision_blocked_reason"] = block_reason
         if self.equity_worker.last_error:
             diagnostics["equity_error"] = self.equity_worker.last_error
+        if self.latest_equity is not None:
+            diagnostics["equity_simulations"] = str(self.latest_equity.simulations)
+            if self.latest_equity.warning:
+                diagnostics["equity_warning"] = self.latest_equity.warning
         state = OverlayState(
             snapshot=snapshot,
             recommendation=recommendation,

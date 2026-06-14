@@ -40,7 +40,7 @@
     "pot_ocr_allowlist": "POT: $0123456789,.",
     "pot_ocr_interval_sec": 0.0,
     "action_ocr_scale": 3.0,
-    "action_ocr_allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",
+    "action_ocr_allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz $0123456789",
     "action_ocr_interval_sec": 0.0
   },
   "parser": {
@@ -50,7 +50,7 @@
   },
   "equity": {
     "simulations": 2500,
-    "timeout_ms": 450,
+    "timeout_ms": 900,
     "max_opponents": 8,
     "random_seed": null
   },

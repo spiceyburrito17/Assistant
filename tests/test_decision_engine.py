@@ -218,6 +218,34 @@ class EquitySanityTests(unittest.TestCase):
         self.assertIsNone(sanitized.hero_equity)
         self.assertEqual(status, SolverStatus.INSUFFICIENT_STATE)
 
+    def test_partial_timeout_with_enough_sims_is_ok(self) -> None:
+        snapshot = GameSnapshot(hero_cards=("As", "Kd"), active_opponents=("villain",))
+        result = EquityResult(
+            hero_equity=0.55,
+            tie_rate=0.0,
+            simulations=150,
+            generation=1,
+            elapsed_ms=900.0,
+            warning="simulation budget hit timeout after 150 simulations",
+        )
+        sanitized, status = sanitize_equity_result(result, snapshot)
+        self.assertEqual(status, SolverStatus.OK)
+        self.assertAlmostEqual(sanitized.hero_equity or 0.0, 0.55)
+
+    def test_timeout_with_few_sims_stays_blocked(self) -> None:
+        snapshot = GameSnapshot(hero_cards=("As", "Kd"), active_opponents=("villain",))
+        result = EquityResult(
+            hero_equity=0.55,
+            tie_rate=0.0,
+            simulations=50,
+            generation=1,
+            elapsed_ms=900.0,
+            warning="simulation budget hit timeout after 50 simulations",
+        )
+        sanitized, status = sanitize_equity_result(result, snapshot)
+        self.assertEqual(status, SolverStatus.TIMEOUT)
+        self.assertIsNone(sanitized.hero_equity)
+
 
 if __name__ == "__main__":
     unittest.main()
