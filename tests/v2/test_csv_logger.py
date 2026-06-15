@@ -52,6 +52,10 @@ class CSVLoggerTests(unittest.TestCase):
                     "block_reason": "",
                     "state_confidence": "high",
                     "solver_status": "ok",
+                    "hero_stack_raw": "$5,000",
+                    "hero_stack_parsed": 5000,
+                    "dom_seq": 42,
+                    "extract_sources": "pot=text-anchor;hero=hand-face-up",
                 }
             )
             text = path.read_text(encoding="utf-8")

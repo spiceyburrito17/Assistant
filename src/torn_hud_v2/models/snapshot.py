@@ -60,6 +60,7 @@ class TableSnapshot:
     block_reason: str | None = None
     generation: int = 0
     seq: int = 0
+    extract_sources: str | None = None
 
 
 @dataclass(frozen=True)

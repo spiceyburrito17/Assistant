@@ -111,6 +111,12 @@ class TableStateMachine:
                 "block_reason": recommendation.block_reason or snapshot.block_reason or "",
                 "state_confidence": recommendation.state_confidence.value,
                 "solver_status": recommendation.solver_status.value,
+                "hero_stack_raw": snapshot.hero_stack.raw or "",
+                "hero_stack_parsed": (
+                    snapshot.hero_stack.parsed if snapshot.hero_stack.parsed is not None else ""
+                ),
+                "dom_seq": snapshot.seq,
+                "extract_sources": snapshot.extract_sources or "",
             }
         )
 

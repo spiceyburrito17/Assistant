@@ -75,6 +75,8 @@ class HudApplication:
             "bridge_clients": str(self.receiver.client_count),
             "bridge_messages": str(self.receiver.messages_received),
             "seq": str(snapshot.seq),
+            "extract_sources": snapshot.extract_sources or "--",
+            "hero_stack": str(snapshot.hero_stack.parsed if snapshot.hero_stack.parsed is not None else "--"),
         }
         if self.receiver.last_error:
             diagnostics["bridge_error"] = self.receiver.last_error

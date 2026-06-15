@@ -54,6 +54,10 @@ CSV_COLUMNS: tuple[str, ...] = (
     "block_reason",
     "state_confidence",
     "solver_status",
+    "hero_stack_raw",
+    "hero_stack_parsed",
+    "dom_seq",
+    "extract_sources",
 )
 
 

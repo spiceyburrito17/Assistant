@@ -189,7 +189,13 @@ On startup the backend:
 1. Open Tampermonkey → Create new script
 2. Paste `userscript/v2/torn_poker_extractor.user.js`
 3. Open Torn poker in the browser manually
-4. Calibrate the `SELECTORS` block in the userscript against the live DOM
+4. Optional: enable DOM calibration logging (console only, no page injection):
+
+```js
+localStorage.setItem("torn_hud_v2_debug", "1"); location.reload();
+```
+
+See `userscript/v2/selectors.md` for anchor documentation.
 
 The userscript is read-only: no clicks, no injected controls, no extra Torn
 requests beyond the page you already opened.
@@ -214,7 +220,8 @@ See `docs/v2_message_schema.json`. Example `table_delta` payload:
   "slot_right_raw": "FOLD",
   "amount_to_call_parsed": 120,
   "legal_actions": ["fold", "call", "raise"],
-  "post_hand_ui": false
+  "post_hand_ui": false,
+  "extract_sources": "pot=text-anchor;hero=hand-face-up;board=community-face-up"
 }
 ```
 

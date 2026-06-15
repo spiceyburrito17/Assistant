@@ -24,7 +24,8 @@
     "legal_actions": { "type": "array", "items": { "enum": ["fold", "check", "call", "raise", "bet"] } },
     "post_hand_ui": { "type": "boolean" },
     "post_hand_labels": { "type": "array", "items": { "type": "string" } },
-    "street_hint": { "type": ["string", "null"] }
+    "street_hint": { "type": ["string", "null"] },
+    "extract_sources": { "type": ["string", "null"] }
   },
   "additionalProperties": true
 }

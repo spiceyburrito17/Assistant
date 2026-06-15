@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from .action_slots import amount_to_call_from_slots, legal_actions_from_slots
 from ..models.messages import TableDeltaMessage
 from ..models.provenance import FieldSource, SourcedValue
 from ..models.snapshot import StateConfidence, Street, TableSnapshot
@@ -52,11 +53,18 @@ def normalize_message(message: TableDeltaMessage, *, previous: TableSnapshot | N
     board_cards = normalize_cards(message.board_cards)
     pot = normalize_money(message.pot_raw, message.pot_parsed)
     hero_stack = normalize_money(message.hero_stack_raw, message.hero_stack_parsed)
-    amount_to_call = normalize_money(message.amount_to_call_raw, message.amount_to_call_parsed)
 
     slot_texts = (message.slot_left_raw, message.slot_centre_raw, message.slot_right_raw)
-    legal_actions = normalize_actions(slot_texts, message.legal_actions)
+    legal_actions = legal_actions_from_slots(slot_texts, explicit=message.legal_actions)
     legal_actions_raw = tuple(text for text in slot_texts if text.strip())
+
+    call_raw, call_parsed = amount_to_call_from_slots(slot_texts)
+    if message.amount_to_call_raw or message.amount_to_call_parsed is not None:
+        amount_to_call = normalize_money(message.amount_to_call_raw, message.amount_to_call_parsed)
+    elif call_raw is not None:
+        amount_to_call = normalize_money(call_raw, call_parsed)
+    else:
+        amount_to_call = normalize_money(None, None)
 
     street = _street_from_board(board_cards, message.street_hint)
     hand_id = previous.hand_id if previous is not None else 0
@@ -86,6 +94,7 @@ def normalize_message(message: TableDeltaMessage, *, previous: TableSnapshot | N
         post_hand_labels=message.post_hand_labels,
         generation=generation,
         seq=message.seq,
+        extract_sources=message.extract_sources,
     )
     return _apply_confidence(snapshot)
 

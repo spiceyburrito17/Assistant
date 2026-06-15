@@ -36,6 +36,7 @@ class TableDeltaMessage:
     post_hand_ui: bool = False
     post_hand_labels: tuple[str, ...] = ()
     street_hint: str | None = None
+    extract_sources: str | None = None
     raw: dict[str, Any] = field(default_factory=dict, compare=False)
 
     @classmethod
@@ -77,6 +78,7 @@ class TableDeltaMessage:
             post_hand_ui=bool(data.get("post_hand_ui", False)),
             post_hand_labels=post_hand_labels,
             street_hint=_optional_str(data.get("street_hint", data.get("street"))),
+            extract_sources=_optional_str(data.get("extract_sources")),
             raw=data,
         )
 

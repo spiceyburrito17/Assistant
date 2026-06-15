@@ -30,6 +30,33 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(snapshot.street, Street.FLOP)
         self.assertEqual(snapshot.pot.parsed, 120.0)
 
+    def test_normalize_message_carries_extract_sources(self) -> None:
+        message = TableDeltaMessage(
+            schema_version=1,
+            message_type="table_delta",
+            seq=9,
+            ts_ms=1,
+            extract_sources="pot=text-anchor;hero=hand-face-up",
+        )
+        snapshot = normalize_message(message)
+        self.assertEqual(snapshot.extract_sources, "pot=text-anchor;hero=hand-face-up")
+        self.assertEqual(snapshot.seq, 9)
+
+    def test_call_any_slot_becomes_check(self) -> None:
+        message = TableDeltaMessage(
+            schema_version=1,
+            message_type="table_delta",
+            seq=2,
+            ts_ms=1,
+            slot_left_raw="FOLD",
+            slot_centre_raw="CALL ANY",
+            slot_right_raw="RAISE TO $50",
+            hero_turn=True,
+        )
+        snapshot = normalize_message(message)
+        self.assertIn("check", snapshot.legal_actions_normalized)
+        self.assertEqual(snapshot.amount_to_call.parsed, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
