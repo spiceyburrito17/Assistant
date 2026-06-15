@@ -1,17 +1,46 @@
-# Torn Poker v2 DOM Anchors (Phase 2)
+# Torn HUD v2 — Data Sources
 
-These anchors are used by `torn_poker_extractor.user.js`. CSS-module hashes
-(e.g. `front___zu4oW`) may change after Torn deploys; prefer `[class*="prefix___"]`.
+v2 is a **pure in-browser decision engine**. It does not scrape Torn poker DOM for
+cards or equity. Install **Torn Poker Helper** (GreasyFork 538541) alongside this script.
 
-| Field | Primary strategy | Fallback |
+## Poker Helper reads (overlay panel)
+
+Reads from Torn Poker Helper's `#mainPokerBox` panel — data attributes first,
+row-label fallback second.
+
+| Field | Data attribute | Row label (EN) |
 |---|---|---|
-| Root | `#mainPokerBox`, `[class*="pokerTable"]` | `main`, `body` |
-| Pot | Text anchor `\bPOT\b` + money | `[class*="pot"]`, `[class*="totalPot"]` |
-| Hero cards | Face-up `[class*="hand___"]` outside community | `[data-player-cards]` |
-| Board | `[class*="communityCards___"]` face-up cards | `[data-board-cards]` |
-| Hero stack | Hero seat `[id^="player-"]` / `[class*="yourTurn"]` money text | Chip/balance spans in hero zone |
-| Hero turn | `[class*="yourTurn___"]` visible | Enabled action buttons present |
-| Action slots | Bottom 3 enabled `button`/`a` sorted by X | `[class*="controls"]` children |
-| Post-hand | Text SHOW CARDS / SIT OUT / LEAVE | `[class*="postHand"]` |
+| Hero cards | `[data-player-cards]` | Your cards |
+| Board | `[data-board-cards]` | Board |
+| Hand name | `[data-combination]` | Combination |
+| Win probability | `[data-win-probability]` | Win chance |
+| Active players | `[data-active-players]` | Active players |
 
-Enable calibration logging: `localStorage.torn_hud_v2_debug = "1"` then reload.
+Active player count drives preflop range thresholds (7-way much tighter than heads-up).
+
+## Torn DOM reads (Helper does NOT expose these)
+
+| Field | Strategy |
+|---|---|
+| Pot | `POT:` text node in game area (excludes Helper panel) → sibling value |
+| Call amount | Call button label (e.g. `Call $120`); CHECK / Call Any → 0 |
+| Hero stack | `[class*="playerMeGateway"]` money element |
+| Action buttons | Bottom bar near `[class*="yourTurn___"]` / `[class*="controls"]` |
+
+## Edge cases
+
+- **Pot unavailable** (pre-deal): overlay shows `Pot —`, EV disabled; preflop range logic still runs from win % + player count.
+- **CHECK available** (call = 0 or missing): shows `CHECK available`, skips fold/call EV comparison.
+
+## Computed metrics
+
+- **Pot odds** = `call / (pot + call)` — only when pot and call amount both known
+- **SPR** = `stack / pot`
+- **EV** = `(win_prob × pot) − ((1 − win_prob) × call)` — disabled when pot unavailable or CHECK available
+
+## Overlay
+
+Bottom-right panel (`#torn-hud-v2-decision-overlay`, z-index 99998) shows:
+`Pot Odds | SPR | EV | Decision` plus one-line reasoning.
+
+Does not modify or overlap Torn Poker Helper's HUD (z-index 99999).
