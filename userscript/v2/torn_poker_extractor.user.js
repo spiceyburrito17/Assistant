@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Poker HUD v2 Extractor
 // @namespace    torn-hud-v2
-// @version      0.3.0
+// @version      0.3.1
 // @description  Passive DOM extractor for live Torn poker — Phase 2 calibration
 // @match        https://www.torn.com/poker*
 // @match        https://www.torn.com/page.php?sid=poker*
@@ -89,6 +89,449 @@
   function findRoot() {
     return queryFirst(ANCHORS.root) || document.body;
   }
+
+  function describeEl(el) {
+    if (!el) return "(null)";
+    const tag = el.tagName?.toLowerCase() || "?";
+    const id = el.id ? `#${el.id}` : "";
+    const cls = el.className ? `.${String(el.className).split(/\s+/).slice(0, 2).join(".")}` : "";
+    return `${tag}${id}${cls}`;
+  }
+
+  function logQueryCounts(label, selectors, root) {
+    if (!DEBUG) return;
+    console.group(`queries: ${label}`);
+    for (const selector of selectors) {
+      try {
+        const nodes = root.querySelectorAll(selector);
+        console.log(`  "${selector}" → ${nodes.length} element(s)`);
+      } catch (err) {
+        console.log(`  "${selector}" → ERROR: ${err.message}`);
+      }
+    }
+    console.groupEnd();
+  }
+
+  function debugCardRejection(el) {
+    const aria = el.getAttribute("aria-label") || "";
+    if (/card face down/i.test(aria)) return "face_down_aria";
+    const fromClass = cardFromTornClass(el.className);
+    if (fromClass) return null;
+    if (aria) {
+      const compact = aria.replace(/[^2-9TJQKAcdhs]/gi, "").toUpperCase();
+      if (/^([2-9TJQKA]|10)[CDHS]$/.test(compact)) return null;
+      return `aria_unparseable:${aria.slice(0, 40)}`;
+    }
+    for (const field of ["dataset.card", "dataset.value", "title", "textContent"]) {
+      const val = field.startsWith("dataset.")
+        ? el.dataset?.[field.split(".")[1]]
+        : field === "title"
+          ? el.getAttribute("title")
+          : el.textContent;
+      if (val && (cardFromTornClass(val) || normalizePlainCard(val))) return null;
+    }
+    return `no_card_data class=${String(el.className || "").slice(0, 60)}`;
+  }
+
+  function debugLogPot(root) {
+    const candidates = [];
+    const audits = [];
+
+    for (const selector of ANCHORS.potClass) {
+      for (const node of root.querySelectorAll(selector)) {
+        const text = textOf(node);
+        const parsed = parseMoney(text);
+        const dollarCount = (text.match(/\$/g) || []).length;
+        const audit = {
+          strategy: "class",
+          selector,
+          element: describeEl(node),
+          text: text.slice(0, 120),
+          parsed,
+          dollarCount,
+          childCount: node.childElementCount,
+        };
+        if (!text) {
+          audit.verdict = "REJECT";
+          audit.reason = "empty_text";
+        } else if (parsed === null && !/\$/.test(text)) {
+          audit.verdict = "REJECT";
+          audit.reason = "no_money_pattern";
+        } else if (dollarCount > 1) {
+          audit.verdict = parsed !== null ? "SELECTED_BUT_SUSPICIOUS" : "REJECT";
+          audit.reason = `multiple_dollar_signs(${dollarCount}) — likely parent wrapper with seat stacks concatenated`;
+        } else {
+          audit.verdict = "ACCEPT";
+          audit.reason = parsed !== null ? "parseable_single_amount" : "has_dollar_sign";
+        }
+        audits.push(audit);
+        if (text) candidates.push({ strategy: "class", selector, text, node });
+      }
+    }
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const textNode = walker.currentNode;
+      const text = textOf(textNode);
+      if (!/\bPOT\b/i.test(text)) continue;
+      const parent = textNode.parentElement;
+      const parentText = textOf(parent);
+      const parsed = parseMoney(parentText);
+      const dollarCount = (parentText.match(/\$/g) || []).length;
+      const audit = {
+        strategy: "text-anchor",
+        element: describeEl(parent),
+        textNodeText: text.slice(0, 80),
+        parentText: parentText.slice(0, 120),
+        parsed,
+        dollarCount,
+        childCount: parent?.childElementCount ?? 0,
+        siblingSummary: [],
+      };
+      if (parent) {
+        for (const sib of parent.children) {
+          audit.siblingSummary.push({ el: describeEl(sib), text: textOf(sib).slice(0, 60) });
+        }
+      }
+      if (parsed === null && !/\$/.test(parentText)) {
+        audit.verdict = "REJECT";
+        audit.reason = "pot_label_found_but_parent_has_no_money";
+      } else if (dollarCount > 1) {
+        audit.verdict = "ACCEPT";
+        audit.reason = `matched_first_acceptable_but_parent_text_concatenates_${dollarCount}_amounts (grabbed wrapper not value sibling)`;
+      } else {
+        audit.verdict = "ACCEPT";
+        audit.reason = parsed !== null ? "parseable_from_parent" : "has_dollar_in_parent";
+      }
+      audits.push(audit);
+      candidates.push({ strategy: "text-anchor", text: parentText, node: parent });
+    }
+
+    console.log("candidate audits (all):", JSON.stringify(audits, null, 2));
+    let selected = null;
+    for (const candidate of candidates) {
+      const parsed = parseMoney(candidate.text);
+      if (parsed !== null || /\$/.test(candidate.text)) {
+        selected = { raw: candidate.text, parsed, strategy: candidate.strategy };
+        break;
+      }
+    }
+    if (!selected) {
+      console.log("selected: null");
+      console.log("null_reason: no candidate passed parseMoney or dollar-sign check");
+    } else {
+      const selAudit = audits.find(
+        (a) => a.parentText === selected.raw || a.text === selected.raw
+      );
+      console.log("selected:", selected);
+      if (selAudit?.reason?.includes("concatenates")) {
+        console.warn("selection_warning:", selAudit.reason);
+      }
+    }
+    return audits;
+  }
+
+  function debugLogHeroCards(root) {
+    logQueryCounts("hero hand nodes", ANCHORS.hand, root);
+    logQueryCounts("hero data-player-cards", ANCHORS.playerCardsData, root);
+
+    const dataNode = queryFirst(ANCHORS.playerCardsData, root);
+    if (dataNode) {
+      const imgs = dataNode.querySelectorAll('[role="img"], [data-card], [class*="card"]');
+      console.log(`data-player-cards node: ${describeEl(dataNode)}, inner card elements: ${imgs.length}`);
+    } else {
+      console.log("data-player-cards: not found (queryFirst returned null)");
+    }
+
+    const handNodes = queryAll(ANCHORS.hand, root);
+    console.log(`hand nodes after queryAll: ${handNodes.length}`);
+    console.log(
+      "note: queryAll stops at first selector with matches — per-selector counts are in queries group above"
+    );
+
+    const imgSelector = '[class*="front"] > div[role="img"], div[role="img"]';
+    const handAudits = [];
+    for (let i = 0; i < handNodes.length; i++) {
+      const hand = handNodes[i];
+      const audit = {
+        index: i,
+        element: describeEl(hand),
+        className: String(hand.className || "").slice(0, 80),
+      };
+
+      if (hand.closest('[class*="communityCards"]')) {
+        audit.verdict = "REJECT";
+        audit.reason = "inside_communityCards_container";
+        handAudits.push(audit);
+        continue;
+      }
+
+      const imgs = hand.querySelectorAll(imgSelector);
+      audit.imgCount = imgs.length;
+      audit.imgQuery = imgSelector;
+      audit.imgDetails = [];
+
+      if (imgs.length === 0) {
+        audit.verdict = "REJECT";
+        audit.reason = "no_role_img_elements_in_hand";
+        handAudits.push(audit);
+        continue;
+      }
+
+      let accepted = 0;
+      for (let j = 0; j < imgs.length; j++) {
+        const img = imgs[j];
+        const detail = { index: j, element: describeEl(img), aria: img.getAttribute("aria-label") || "" };
+        if (!isFaceUpCard(img)) {
+          detail.verdict = "REJECT";
+          detail.reason = detail.aria === "card face down" ? "face_down" : "face_down_or_missing_aria";
+        } else {
+          const card = cardFromElement(img);
+          if (card) {
+            detail.verdict = "ACCEPT";
+            detail.card = card;
+            accepted++;
+          } else {
+            detail.verdict = "REJECT";
+            detail.reason = debugCardRejection(img);
+          }
+        }
+        audit.imgDetails.push(detail);
+      }
+
+      if (accepted === 0) {
+        audit.verdict = "REJECT";
+        audit.reason = "all_imgs_failed_face_up_or_card_parse";
+      } else {
+        audit.verdict = "ACCEPT";
+        audit.reason = `${accepted} face-up card(s) parsed`;
+      }
+      handAudits.push(audit);
+    }
+
+    console.log("hand node audits:", JSON.stringify(handAudits, null, 2));
+    const result = extractHeroCards(root);
+    if (result.cards.length === 0) {
+      console.log("null_reason: no cards after extraction — see hand node audits above");
+    }
+    return handAudits;
+  }
+
+  function debugLogBoardCards(root) {
+    logQueryCounts("board data-board-cards", ANCHORS.boardCardsData, root);
+    logQueryCounts("board communityCards", ANCHORS.community, root);
+
+    const imgSelector = '[class*="front"] > div[role="img"], div[role="img"]';
+    const rootImgCount = root.querySelectorAll(imgSelector).length;
+    console.log(`root-level "${imgSelector}" raw count=${rootImgCount} (before any filter)`);
+
+    for (const selector of ANCHORS.boardCardsData) {
+      const nodes = root.querySelectorAll(selector);
+      console.log(`[data path] "${selector}" raw count=${nodes.length}`);
+    }
+
+    const communityNodes = [];
+    for (const selector of ANCHORS.community) {
+      const nodes = Array.from(root.querySelectorAll(selector));
+      console.log(`[community path] "${selector}" raw count=${nodes.length} (before any filter)`);
+      communityNodes.push(...nodes);
+    }
+
+    if (communityNodes.length === 0) {
+      console.log("null_reason: communityCards selector returned 0 nodes — board cannot be read");
+    }
+
+    const communityAudits = [];
+    for (let i = 0; i < communityNodes.length; i++) {
+      const community = communityNodes[i];
+      const imgs = community.querySelectorAll('[class*="front"] > div[role="img"], div[role="img"]');
+      const audit = {
+        index: i,
+        element: describeEl(community),
+        imgCountBeforeFilter: imgs.length,
+        imgDetails: [],
+      };
+      for (let j = 0; j < imgs.length; j++) {
+        const img = imgs[j];
+        const detail = { index: j, element: describeEl(img), aria: img.getAttribute("aria-label") || "" };
+        if (!isFaceUpCard(img)) {
+          detail.verdict = "REJECT";
+          detail.reason = "face_down";
+        } else {
+          const card = cardFromElement(img);
+          if (card) {
+            detail.verdict = "ACCEPT";
+            detail.card = card;
+          } else {
+            detail.verdict = "REJECT";
+            detail.reason = debugCardRejection(img);
+          }
+        }
+        audit.imgDetails.push(detail);
+      }
+      communityAudits.push(audit);
+    }
+    console.log("community node audits:", JSON.stringify(communityAudits, null, 2));
+
+    const result = extractBoardCards(root);
+    if (result.cards.length === 0) {
+      console.log("null_reason: no board cards extracted — check raw query counts and img audits above");
+    }
+    return communityAudits;
+  }
+
+  function debugLogHeroStack(root) {
+    logQueryCounts("hero stack: hand (for zone)", ANCHORS.hand, root);
+    logQueryCounts("hero stack: yourTurn", ANCHORS.yourTurn, root);
+    logQueryCounts("hero stack: heroSeat", ANCHORS.heroSeat, root);
+
+    const handNodes = queryAll(ANCHORS.hand, root);
+    console.log(`findHeroZone: scanning ${handNodes.length} hand node(s)`);
+
+    const zoneAudits = [];
+    for (let i = 0; i < handNodes.length; i++) {
+      const hand = handNodes[i];
+      const audit = { index: i, element: describeEl(hand) };
+      if (hand.closest('[class*="communityCards"]')) {
+        audit.verdict = "SKIP";
+        audit.reason = "inside_communityCards";
+        zoneAudits.push(audit);
+        continue;
+      }
+      const faceUp = hand.querySelector('[class*="front"] > div[role="img"]:not([aria-label="card face down"])');
+      if (!faceUp) {
+        audit.verdict = "SKIP";
+        audit.reason = "no_face_up_card_in_hand";
+        zoneAudits.push(audit);
+        continue;
+      }
+      const zone =
+        hand.closest('[id^="player-"]') ||
+        hand.closest('[class*="playerWrapper"]') ||
+        hand.closest('[class*="opponent"]') ||
+        hand.parentElement;
+      audit.verdict = "ZONE_FOUND";
+      audit.zone = describeEl(zone);
+      zoneAudits.push(audit);
+    }
+    console.log("hero zone search audits:", zoneAudits);
+
+    const yourTurn = queryFirst(ANCHORS.yourTurn, root);
+    console.log(`yourTurn queryFirst: ${yourTurn ? describeEl(yourTurn) : "null"}`);
+
+    const heroZone = findHeroZone(root);
+    if (!heroZone) {
+      console.log("null_reason: findHeroZone returned null — no hand with face-up card and no yourTurn fallback");
+      return;
+    }
+    console.log(`heroZone resolved: ${describeEl(heroZone)}`);
+
+    const moneyEls = heroZone.querySelectorAll("span, div, p");
+    console.log(`heroZone query "span, div, p" raw count=${moneyEls.length} (before $ filter)`);
+
+    const moneyAudits = [];
+    for (const el of moneyEls) {
+      const text = textOf(el);
+      const audit = { element: describeEl(el), text: text.slice(0, 60) };
+      if (!text) {
+        audit.verdict = "REJECT";
+        audit.reason = "empty_text";
+      } else if (!/\$/.test(text)) {
+        audit.verdict = "REJECT";
+        audit.reason = "no_dollar_sign";
+      } else if (/\bPOT\b/i.test(text)) {
+        audit.verdict = "REJECT";
+        audit.reason = "contains_POT_label";
+      } else {
+        audit.verdict = "ACCEPT";
+        audit.parsed = parseMoney(text);
+      }
+      moneyAudits.push(audit);
+    }
+    console.log("money element audits:", JSON.stringify(moneyAudits, null, 2));
+
+    const accepted = moneyAudits.filter((a) => a.verdict === "ACCEPT");
+    if (accepted.length === 0) {
+      console.log("null_reason: no span/div/p in heroZone passed $ filter (see money element audits)");
+    }
+  }
+
+  function debugLogActionSlots(root) {
+    const yourTurn = queryFirst(ANCHORS.yourTurn, root);
+    const scopes = [];
+    const scopeMeta = [];
+
+    if (yourTurn) {
+      const scope = yourTurn.closest('[class*="controls"]') || yourTurn.parentElement || yourTurn;
+      scopes.push(scope);
+      scopeMeta.push({ source: "yourTurn", element: describeEl(scope) });
+    }
+    const controlsScope = queryFirst(ANCHORS.controls, root);
+    scopes.push(controlsScope);
+    scopeMeta.push({ source: "controls_anchor", element: describeEl(controlsScope) });
+    scopes.push(root);
+    scopeMeta.push({ source: "root", element: describeEl(root) });
+
+    console.log("action slot scopes:", scopeMeta);
+
+    const buttonAudits = [];
+    for (let si = 0; si < scopeMeta.length; si++) {
+      const scopeInfo = scopeMeta[si];
+      const scope = scopes[si];
+      if (!scope) {
+        console.log(`scope ${scopeInfo.source}: null — skipped`);
+        continue;
+      }
+      const rawButtons = scope.querySelectorAll("button, a, [role='button']");
+      console.log(`scope ${scopeInfo.source} (${scopeInfo.element}): raw button count=${rawButtons.length}`);
+
+      for (const el of rawButtons) {
+        const text = textOf(el);
+        const rect = el.getBoundingClientRect();
+        const audit = {
+          scope: scopeInfo.source,
+          element: describeEl(el),
+          text: text.slice(0, 80),
+          disabled: el.disabled || el.getAttribute("aria-disabled") === "true",
+          rect: { left: Math.round(rect.left), top: Math.round(rect.top), w: Math.round(rect.width), h: Math.round(rect.height) },
+        };
+        if (audit.disabled) {
+          audit.verdict = "REJECT";
+          audit.reason = "disabled";
+        } else if (!text) {
+          audit.verdict = "REJECT";
+          audit.reason = "empty_text";
+        } else if (!/\b(fold|check|call|raise|bet|show cards|sit out|leave)\b/i.test(text)) {
+          audit.verdict = "REJECT";
+          audit.reason = "no_poker_keyword_match";
+        } else if (rect.width < 20 || rect.height < 10) {
+          audit.verdict = "REJECT";
+          audit.reason = `rect_too_small(${Math.round(rect.width)}x${Math.round(rect.height)})`;
+        } else {
+          audit.verdict = "ACCEPT";
+        }
+        buttonAudits.push(audit);
+      }
+    }
+
+    console.log("button audits (all scopes):", JSON.stringify(buttonAudits, null, 2));
+
+    const result = extractActionSlots(root);
+    console.log("deduped buttons (extractActionButtons result):", JSON.stringify(
+      result.buttons.map((b) => ({ text: b.text, left: Math.round(b.left), top: Math.round(b.top) })),
+      null,
+      2
+    ));
+    console.log("assigned slots:", JSON.stringify(result.slots, null, 2));
+    console.log("classified labels:", JSON.stringify(result.labels, null, 2));
+    console.log("source:", result.source);
+
+    if (!result.buttons.length) {
+      console.log("null_reason: no buttons passed disabled/keyword/rect filters — see button audits");
+    }
+    return result;
+  }
+
 
   function parseMoney(raw) {
     if (!raw) return null;
@@ -421,31 +864,34 @@
     let postHand = {};
 
     logGroup("pot", () => {
+      if (DEBUG) debugLogPot(root);
       pot = extractPot(root);
-      if (DEBUG) console.log("candidates", pot.candidates, "selected", { raw: pot.raw, parsed: pot.parsed });
+      if (DEBUG) console.log("extract result", { raw: pot.raw, parsed: pot.parsed, source: pot.source });
     });
 
     logGroup("hero_cards", () => {
+      if (DEBUG) debugLogHeroCards(root);
       hero = extractHeroCards(root);
-      if (DEBUG) console.log("selected", hero.cards, "candidates", hero.candidates);
+      if (DEBUG) console.log("extract result", { cards: hero.cards, source: hero.source });
     });
 
     logGroup("board_cards", () => {
+      if (DEBUG) debugLogBoardCards(root);
       board = extractBoardCards(root);
-      if (DEBUG) console.log("selected", board.cards, "candidates", board.candidates);
+      if (DEBUG) console.log("extract result", { cards: board.cards, source: board.source });
     });
 
     logGroup("hero_stack", () => {
+      if (DEBUG) debugLogHeroStack(root);
       stack = extractHeroStack(root);
-      if (DEBUG) console.log("candidates", stack.candidates, "selected", { raw: stack.raw, parsed: stack.parsed });
+      if (DEBUG) console.log("extract result", { raw: stack.raw, parsed: stack.parsed, source: stack.source });
     });
 
     logGroup("action_slots", () => {
-      actions = extractActionSlots(root);
       if (DEBUG) {
-        console.log("buttons", actions.buttons);
-        console.log("slots", actions.slots);
-        console.log("labels", actions.labels);
+        actions = debugLogActionSlots(root);
+      } else {
+        actions = extractActionSlots(root);
       }
     });
 
