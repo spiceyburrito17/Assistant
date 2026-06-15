@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 torn-hud = "torn_accessibility_hud.app:main"
+torn-hud-v2 = "torn_hud_v2.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -29,4 +30,4 @@ torn_accessibility_hud = ["data/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests"]
+testpaths = ["tests", "tests/v2"]

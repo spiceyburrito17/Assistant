@@ -136,3 +136,90 @@ PYTHONPATH=src python -m unittest discover -s tests
 - Animated, too-dark, too-bright, or low-contrast frames are blocked by the
   stable-frame debouncer.
 - Equity simulations have a timeout budget and run off the UI thread.
+
+## Torn HUD v2 (DOM-first)
+
+v2 is a separate event-driven engine under `src/torn_hud_v2/`. It does **not**
+replace the v1 OCR pipeline in place. v2 uses a passive Tampermonkey userscript
+plus a localhost WebSocket backend.
+
+### v2 folder layout
+
+```text
+src/torn_hud_v2/
+  constants.py          # stable CSV/event labels (single source of truth)
+  config.py
+  app.py                # event-driven coordinator
+  bridge/receiver.py    # localhost WebSocket receiver
+  debug/                # CSV logger + shared sanitizer
+  decision/engine.py    # stub recommendation logic (phase 1)
+  models/               # message schema, snapshot, provenance
+  normalization/        # DOM payload -> normalized snapshot
+  overlay/hud.py        # separate local Tk HUD window
+  state/                # container, validator, state machine
+
+userscript/v2/torn_poker_extractor.user.js
+docs/v2_message_schema.json
+config/v2_default.json
+tests/v2/
+```
+
+### Install v2
+
+```bash
+pip install -e .
+```
+
+### Run v2 backend
+
+```bash
+torn-hud-v2 --config config/v2_default.json
+```
+
+On startup the backend:
+
+- listens on `ws://localhost:8765`
+- resets `debug_captures/v2_current_session.csv` to header-only
+- waits for DOM deltas from the userscript
+- writes sparse CSV rows on meaningful state-machine events
+- shows a separate local overlay window
+
+### Install v2 userscript
+
+1. Open Tampermonkey → Create new script
+2. Paste `userscript/v2/torn_poker_extractor.user.js`
+3. Open Torn poker in the browser manually
+4. Calibrate the `SELECTORS` block in the userscript against the live DOM
+
+The userscript is read-only: no clicks, no injected controls, no extra Torn
+requests beyond the page you already opened.
+
+### v2 message schema
+
+See `docs/v2_message_schema.json`. Example `table_delta` payload:
+
+```json
+{
+  "schema_version": 1,
+  "message_type": "table_delta",
+  "seq": 12,
+  "ts_ms": 1718280000000,
+  "pot_raw": "POT: $18K",
+  "pot_parsed": 18000,
+  "hero_cards": ["Ah", "Kd"],
+  "board_cards": ["2s", "7h", "Jc"],
+  "hero_turn": true,
+  "slot_left_raw": "RAISE TO $240",
+  "slot_centre_raw": "CALL $120",
+  "slot_right_raw": "FOLD",
+  "amount_to_call_parsed": 120,
+  "legal_actions": ["fold", "call", "raise"],
+  "post_hand_ui": false
+}
+```
+
+### v2 tests
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests/v2
+```

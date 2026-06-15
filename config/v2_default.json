@@ -1,0 +1,7 @@
+{
+  "ws_host": "localhost",
+  "ws_port": 8765,
+  "session_csv_path": "debug_captures/v2_current_session.csv",
+  "session_csv_enabled": true,
+  "poll_interval_sec": 0.05
+}
