@@ -1,0 +1,9 @@
+{
+  "fold": ["folds", "folded"],
+  "check": ["checks", "checked"],
+  "call": ["calls", "called"],
+  "bet": ["bets", "bet"],
+  "raise": ["raises to", "raises", "raised to", "raised"],
+  "all_in": ["all in", "all-in", "shoves"],
+  "post_blind": ["posts small blind", "posts big blind", "posts blind"]
+}

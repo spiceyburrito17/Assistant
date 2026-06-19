@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TornHudV2TableDelta",
+  "type": "object",
+  "required": ["schema_version", "message_type", "seq", "ts_ms"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "message_type": { "enum": ["hello", "ping", "table_delta"] },
+    "seq": { "type": "integer", "minimum": 0 },
+    "ts_ms": { "type": "integer", "minimum": 0 },
+    "source_url": { "type": "string" },
+    "pot_raw": { "type": ["string", "null"] },
+    "pot_parsed": { "type": ["number", "null"] },
+    "hero_cards": { "type": "array", "items": { "type": "string" } },
+    "board_cards": { "type": "array", "items": { "type": "string" } },
+    "hero_stack_raw": { "type": ["string", "null"] },
+    "hero_stack_parsed": { "type": ["number", "null"] },
+    "hero_turn": { "type": "boolean" },
+    "slot_left_raw": { "type": "string" },
+    "slot_centre_raw": { "type": "string" },
+    "slot_right_raw": { "type": "string" },
+    "amount_to_call_raw": { "type": ["string", "null"] },
+    "amount_to_call_parsed": { "type": ["number", "null"] },
+    "legal_actions": { "type": "array", "items": { "enum": ["fold", "check", "call", "raise", "bet"] } },
+    "post_hand_ui": { "type": "boolean" },
+    "post_hand_labels": { "type": "array", "items": { "type": "string" } },
+    "street_hint": { "type": ["string", "null"] },
+    "extract_sources": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}

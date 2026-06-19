@@ -1,0 +1,69 @@
+{
+  "capture": {
+    "monitor_index": 2,
+    "region": {
+      "left": -1159,
+      "top": 131,
+      "width": 396,
+      "height": 176
+    },
+    "fps_limit": 15.0
+  },
+  "debounce": {
+    "stable_frames_required": 3,
+    "max_mean_delta": 3.5,
+    "hash_width": 96,
+    "hash_height": 54,
+    "min_luma": 12.0,
+    "max_luma": 245.0,
+    "min_variance": 8.0
+  },
+  "ocr": {
+    "languages": ["en"],
+    "gpu": true,
+    "min_confidence": 0.48,
+    "paragraph": false,
+    "queue_size": 2,
+    "calibrated_regions_path": "config/regions_calibrated.json",
+    "debug_card_regions": false,
+    "debug_card_regions_dir": "debug_captures/card_regions",
+    "debug_card_regions_interval_sec": 2.0,
+    "debug_table_regions": false,
+    "debug_table_regions_dir": "debug_captures/table_regions",
+    "debug_table_regions_interval_sec": 1.0,
+    "card_ocr_scale": 3.0,
+    "card_ocr_allowlist": "A23456789TJQK10cdhsCDHS",
+    "hero_cards_interval_sec": 0.25,
+    "card_stable_reads_required": 3,
+    "card_cache_max_missing_scans": 12,
+    "pot_ocr_scale": 4.0,
+    "pot_ocr_allowlist": "POT: $0123456789,.",
+    "pot_ocr_interval_sec": 0.0,
+    "action_ocr_scale": 3.0,
+    "action_ocr_allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz $0123456789,./KkMm",
+    "action_ocr_interval_sec": 0.0
+  },
+  "parser": {
+    "max_reasonable_amount": 10000000.0,
+    "min_line_confidence": 0.42,
+    "action_patterns_path": null
+  },
+  "equity": {
+    "simulations": 2500,
+    "timeout_ms": 900,
+    "max_opponents": 8,
+    "random_seed": null
+  },
+  "overlay": {
+    "title": "Torn Accessibility HUD",
+    "width": 440,
+    "height": 360,
+    "x": 20,
+    "y": 20,
+    "alpha": 0.86,
+    "always_on_top": true,
+    "poll_interval_ms": 50,
+    "background_hex": "#101820",
+    "text_hex": "#F8F8F2"
+  }
+}

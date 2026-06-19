@@ -1,1 +1,173 @@
-# Assistant
+# Torn Accessibility HUD
+
+Local Python accessibility HUD for reading fast Torn City poker text logs and
+translating them into a simple color-coded overlay. The tool only reads pixels
+from the local screen and does not click, type, or automate gameplay.
+
+## Architecture
+
+- **Eyes (`vision/`)**: `mss` screen capture, strict stable-frame debouncing,
+  and EasyOCR configured with `gpu=True` by default.
+- **Memory (`parsing/`, `tracking/`)**: OCR log parsing, anomaly rejection,
+  VPIP/PFR opponent ledger, and a 169-class `RangeMatrix`.
+- **Brain & Interface (`poker/`, `ui/`)**: Treys Monte Carlo equity simulation
+  in a background thread plus a transparent Tkinter overlay.
+
+Tkinter runs only rendering work. OCR, capture, parsing/tracking coordination,
+and equity simulation run in daemon threads with latest-only queues so stale
+frames are dropped instead of blocking the UI.
+
+## Install
+
+Python 3.10+ is required.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+For GPU OCR, install CUDA-compatible PyTorch for your local GPU before or after
+installing this package. EasyOCR is initialized as:
+
+```python
+easyocr.Reader(["en"], gpu=True)
+```
+
+## Run
+
+Tune `config/default_config.json` so `capture.region` matches the game log area,
+then run:
+
+```bash
+torn-hud --config config/default_config.json
+```
+
+To write a fresh config template:
+
+```bash
+torn-hud --write-default-config config/local_config.json
+```
+
+## Region calibration
+
+Torn's poker UI exposes different information in different visual forms. The
+text log can be read by OCR, but hero cards, board cards, and stack/balance
+areas are image regions that future detectors will need to inspect separately.
+For that reason the project supports calibrating:
+
+- `log_region` - text log area; this is intended to become `capture.region`
+  for the current OCR pipeline.
+- `hero_cards_region` - your private card images.
+- `board_cards_region` - community card images.
+- `stack_region` - chip stack or balance area.
+
+Run the interactive calibration tool from the repository root:
+
+```bash
+python tools/calibrate_regions.py
+```
+
+By default it captures the leftmost physical monitor, which matches a common
+setup where the second monitor sits to the left of the main display, and writes
+`config/regions_calibrated.json`. Use `--monitor-index` if you need to force a
+specific MSS monitor:
+
+```bash
+python tools/calibrate_regions.py --monitor-index 2 --output config/regions_calibrated.json
+```
+
+OpenCV will show the screenshot fullscreen on the selected monitor so the OS
+window title bar does not offset the displayed image. Add `--windowed` only if
+you need a normal debug window. Draw rectangles in this order: log, hero cards,
+board cards, stack, pot, then the three action-bar slots left-to-right
+(`action_slot_left`, `action_slot_centre`, `action_slot_right`). Each slot box
+should cover exactly one button (~200px wide, ~45px tall). Drag a rectangle,
+`C` to clear the current rectangle, and press `Q` or Esc when you are done. The
+tool converts the screenshot-local rectangles into global screen coordinates
+using the monitor offset, writes the JSON file, and prints the same JSON to
+stdout.
+
+As a first integration step, copy `log_region` from
+`config/regions_calibrated.json` into `capture.region` in
+`config/default_config.json`. The other regions are loaded by the optional
+`RegionsConfig` helper and are reserved for later image-based hero/board/stack
+recognition.
+
+The current calibrated boxes are hardcoded in `config/regions_calibrated.json`.
+If card OCR misses hero or board cards, rerun `python tools/calibrate_regions.py`
+and redraw `hero_cards_region` and `board_cards_region` tightly around the card
+faces. For manual tuning, `config/default_config.json` also supports explicit
+`ocr.hero_cards_region` and `ocr.board_cards_region` overrides. Tune
+`ocr.hero_cards_region` to the bottom-centre player area where your two face-up
+hole cards appear. Hero card capture is not gated by the scrolling-log stable
+frame debounce and uses `ocr.hero_cards_interval_sec` (`0.25` by default).
+
+### OCR debug captures (opt-in)
+
+Card OCR runs whenever calibrated hero/board regions are loaded. By default it
+does **not** write debug artifacts to disk. Set `ocr.debug_card_regions` to
+`true` in your config only while calibrating regions or troubleshooting card
+recognition. When enabled, the OCR worker saves raw and preprocessed hero/board
+crops plus OCR text under `debug_captures/card_regions/` (or the path in
+`ocr.debug_card_regions_dir`). Turn the flag off again for normal play to avoid
+filling the disk with screenshots.
+
+The hero folded/greyed guard is disabled because Torn's dark/inverted card theme
+can make live hero cards look visually similar to folded cards.
+Hero/board detection looks for face-up white card rectangles, OCRs only each
+rank corner, and infers suits from glyph color. It emits hero cards only when
+two cards are detected and board cards only when three to five cards are
+detected, which avoids treating face-down card backs as real board cards.
+
+## Tests
+
+The deterministic tests avoid screen capture, EasyOCR, and Treys imports:
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests
+```
+
+## Safety behavior
+
+- Low-confidence OCR lines are ignored.
+- Duplicate/impossible cards are rejected.
+- Unreasonable chip amounts are discarded.
+- Animated, too-dark, too-bright, or low-contrast frames are blocked by the
+  stable-frame debouncer.
+- Equity simulations have a timeout budget and run off the UI thread.
+
+## Torn HUD v2 (Decision Engine)
+
+v2 is a **pure in-browser decision overlay** — no WebSocket, no Python backend required
+for normal use. Install it **alongside [Torn Poker Helper](https://greasyfork.org/en/scripts/538541-torn-poker-helper)** (GreasyFork 538541).
+
+Poker Helper owns card reading and win-probability Monte Carlo. v2 reads Helper's
+`[data-*]` HUD fields, supplements pot/stack/actions from Torn's DOM, computes pot
+odds / SPR / EV, and shows a minimal second overlay (bottom-right).
+
+### Install
+
+1. Install **Torn Poker Helper** in Tampermonkey (GreasyFork 538541)
+2. Install `userscript/v2/torn_poker_extractor.user.js` in Tampermonkey
+3. Open a Torn poker table — both scripts run at `document-idle`
+
+### Overlay output
+
+```
+Pot Odds 25% | SPR 8.2 | EV +$45
+CALL
++EV $45 — 52% vs 25% pot odds
+```
+
+See `userscript/v2/selectors.md` for data sources.
+
+### Optional Python backend (legacy)
+
+The `src/torn_hud_v2/` WebSocket pipeline from Phase 1–2 is **not used** by the
+current userscript. It remains in the repo for experiments but is not required.
+
+```bash
+pip install -e .
+PYTHONPATH=src python -m unittest discover -s tests/v2
+```
